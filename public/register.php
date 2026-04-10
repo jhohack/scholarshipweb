@@ -100,7 +100,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     // Redirect to the verification page
                     header("Location: verify.php?email=" . urlencode($email));
                     exit();
-                } catch (Exception $e) {
+                } catch (\Throwable $e) {
                     $errors[] = mailConfigurationErrorMessage();
                     error_log("Mailer Error: " . ($mail->ErrorInfo ?: $e->getMessage()));
                 }

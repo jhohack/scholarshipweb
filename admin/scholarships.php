@@ -177,7 +177,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 $mail->Body = "Hello {$full_name},<br><br>The term for your scholarship <strong>{$student['scholarship_name']}</strong> has ended.<br>Your status has been updated to <strong>For Renewal</strong>.<br><br>Please log in to your dashboard and submit a renewal application if you wish to continue receiving this scholarship.<br><br><a href='{$renew_link}' style='background-color: #0d6efd; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;'>Renew Now</a><br><br>Or visit your dashboard: <a href='" . BASE_URL . "/student/dashboard.php'>Go to Dashboard</a><br><br>Sincerely,<br>The DVC Scholarship Hub Team";
                                 $mail->send();
                             }
-                        } catch (Exception $e) {
+                        } catch (\Throwable $e) {
                             error_log("Mail error during bulk renewal: " . ($mail->ErrorInfo ?: $e->getMessage()));
                         }
                     }

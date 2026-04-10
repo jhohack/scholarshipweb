@@ -72,7 +72,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         header("Location: verify.php");
                         exit();
 
-                    } catch (Exception $e) {
+                    } catch (\Throwable $e) {
                         $errors[] = mailConfigurationErrorMessage();
                         error_log("Mailer Error: " . ($mail->ErrorInfo ?: $e->getMessage()));
                     }

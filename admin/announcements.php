@@ -327,7 +327,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             flashMessage("Email blast sent successfully to $sent_count recipients.");
                             header("Location: announcements.php?action=email_blast");
                             exit();
-                        } catch (Exception $e) {
+                        } catch (\Throwable $e) {
                             $errors[] = mailConfigurationErrorMessage();
                             error_log("Mailer Error: " . ($mail->ErrorInfo ?: $e->getMessage()));
                         }

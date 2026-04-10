@@ -4,6 +4,20 @@ if (!function_exists('env_config')) {
     function env_config(string $key, $default = null)
     {
         $value = $_ENV[$key] ?? $_SERVER[$key] ?? getenv($key);
+
+        if (is_string($value)) {
+            $value = trim($value);
+
+            $length = strlen($value);
+            if ($length >= 2) {
+                $first = $value[0];
+                $last = $value[$length - 1];
+                if (($first === '"' && $last === '"') || ($first === "'" && $last === "'")) {
+                    $value = trim(substr($value, 1, -1));
+                }
+            }
+        }
+
         return ($value === false || $value === null || $value === '') ? $default : $value;
     }
 }

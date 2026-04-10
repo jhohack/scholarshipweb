@@ -364,7 +364,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
                     
                     $mail->Body = $body;
                     $mail->send();
-                } catch (Exception $e) {
+                } catch (\Throwable $e) {
                     error_log("Mail error: " . ($mail->ErrorInfo ?: $e->getMessage()));
                 }
             }

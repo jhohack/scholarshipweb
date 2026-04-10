@@ -54,7 +54,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
 
             $_SESSION['last_resend_time'] = time();
             $success_message = "A new verification code has been sent to your email.";
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             $errors[] = mailConfigurationErrorMessage();
             error_log("Mailer Error: " . ($mail->ErrorInfo ?: $e->getMessage()));
         }

@@ -102,7 +102,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && empty($errors)) {
                     $mail->Body    = "Hello {$student_info['student_name']},<br><br>We have received your request to drop the <strong>{$application['scholarship_name']}</strong> scholarship.<br><br><strong>Reason:</strong> " . nl2br(htmlspecialchars($reason)) . "<br><br>Your request is now pending admin approval. You will be notified once a decision is made.<br><br>Sincerely,<br>The DVC Scholarship Hub Team";
 
                     $mail->send();
-                } catch (Exception $e) {
+                } catch (\Throwable $e) {
                     // Log error but don't stop the process
                     error_log("Mail error: " . ($mail->ErrorInfo ?: $e->getMessage()));
                 }

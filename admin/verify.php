@@ -57,7 +57,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
                 $mail->send();
                 
                 $success_message = "A new verification code has been sent.";
-            } catch (Exception $e) {
+            } catch (\Throwable $e) {
                 $errors[] = mailConfigurationErrorMessage();
                 error_log("Mailer Error: " . ($mail->ErrorInfo ?: $e->getMessage()));
             }

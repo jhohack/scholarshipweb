@@ -48,7 +48,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                     $mail->send();
                     $message = "If an account with that email exists, a password reset link has been sent.";
-                } catch (Exception $e) {
+                } catch (\Throwable $e) {
                     $error = mailConfigurationErrorMessage();
                     error_log("Mailer Error: " . ($mail->ErrorInfo ?: $e->getMessage()));
                 }
