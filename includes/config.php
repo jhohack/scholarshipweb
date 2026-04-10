@@ -50,6 +50,8 @@ if ($databaseUrl) {
             'user' => isset($parsedUrl['user']) ? rawurldecode($parsedUrl['user']) : null,
             'pass' => isset($parsedUrl['pass']) ? rawurldecode($parsedUrl['pass']) : null,
             'sslmode' => $queryParams['sslmode'] ?? null,
+            'options' => $queryParams['options'] ?? null,
+            'channel_binding' => $queryParams['channel_binding'] ?? null,
         ];
     }
 }
@@ -94,6 +96,24 @@ $resolvedDbSslMode = env_config(
     'DB_SSL_MODE',
     $parsedDatabaseUrl['sslmode'] ?? ($resolvedDbDriver === 'pgsql' && !$isLocalHost ? 'require' : '')
 );
+$resolvedDbChannelBinding = env_config(
+    'DB_CHANNEL_BINDING',
+    ''
+);
+$resolvedDbNeonEndpoint = env_config('DB_NEON_ENDPOINT', '');
+if ($resolvedDbNeonEndpoint === '' && $resolvedDbDriver === 'pgsql' && is_string($resolvedDbHost)) {
+    if (preg_match('/^([^.]+)\..*\\.neon\\.tech$/i', $resolvedDbHost, $matches)) {
+        $resolvedDbNeonEndpoint = preg_replace('/-pooler$/i', '', $matches[1]);
+    }
+}
+
+$resolvedDbPgOptions = env_config(
+    'DB_PG_OPTIONS',
+    $parsedDatabaseUrl['options'] ?? ''
+);
+if ($resolvedDbPgOptions === '' && $resolvedDbNeonEndpoint !== '') {
+    $resolvedDbPgOptions = 'endpoint=' . $resolvedDbNeonEndpoint;
+}
 
 define('DB_DRIVER', $resolvedDbDriver);
 define('DB_HOST', $resolvedDbHost);
@@ -102,6 +122,9 @@ define('DB_USER', $resolvedDbUser);
 define('DB_PASS', $resolvedDbPass);
 define('DB_PORT', $resolvedDbPort);
 define('DB_SSL_MODE', $resolvedDbSslMode);
+define('DB_CHANNEL_BINDING', $resolvedDbChannelBinding);
+define('DB_NEON_ENDPOINT', $resolvedDbNeonEndpoint);
+define('DB_PG_OPTIONS', $resolvedDbPgOptions);
 define('BASE_URL', rtrim(env_config('BASE_URL', $legacyBaseUrl), '/'));
 
 define('GOOGLE_CLIENT_ID', env_config('GOOGLE_CLIENT_ID', '127649949023-se8oo6060ho0amkk852h2lk0atms23vj.apps.googleusercontent.com'));

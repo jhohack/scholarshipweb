@@ -1,8 +1,6 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) {
-    // Enable URL-based session IDs to allow multiple accounts in the same browser (multitasking)
-    ini_set('session.use_trans_sid', 1);
-    ini_set('session.use_only_cookies', 0);
+    // Keep admin and student logins separate by using a dedicated admin session.
     session_name('scholarship_admin');
     session_start();
 }
