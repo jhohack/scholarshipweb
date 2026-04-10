@@ -134,6 +134,8 @@ define('SMTP_USER', env_config('SMTP_USER', ''));
 define('SMTP_PASS', env_config('SMTP_PASS', ''));
 define('SMTP_PORT', (int) env_config('SMTP_PORT', 587));
 define('SMTP_SECURE', env_config('SMTP_SECURE', 'tls'));
+define('SMTP_FROM_EMAIL', env_config('SMTP_FROM_EMAIL', env_config('MAIL_FROM_ADDRESS', SMTP_USER)));
+define('SMTP_FROM_NAME', env_config('SMTP_FROM_NAME', env_config('MAIL_FROM_NAME', 'DVC Scholarship Hub')));
 
 define('UPLOAD_DRIVER', env_config('UPLOAD_DRIVER', IS_VERCEL ? 'database' : 'local'));
 define('UPLOAD_MAX_BYTES', (int) env_config('UPLOAD_MAX_BYTES', IS_VERCEL ? 4194304 : 5242880));
