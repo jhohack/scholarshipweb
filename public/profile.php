@@ -155,11 +155,15 @@ include 'header.php';
             <!-- Left Column: Profile Picture -->
             <div class="col-lg-4 text-center">
                 <?php
-                $profile_pic_url = !empty($student['profile_picture_path'])
-                    ? storedFilePathToUrl($student['profile_picture_path'])
-                    : 'assets/images/default-avatar.png';
+                $profile_pic_url = defaultAvatarUrl(trim(($student['first_name'] ?? '') . ' ' . ($student['last_name'] ?? '')));
+                if (!empty($student['profile_picture_path'])) {
+                    $profile_image = describeStoredFile($pdo, $student['profile_picture_path'], $base_path, $profile_pic_url);
+                    if (!empty($profile_image['url'])) {
+                        $profile_pic_url = $profile_image['url'];
+                    }
+                }
                 ?>
-                <img src="<?php echo $profile_pic_url; ?>" alt="Profile Picture" class="img-fluid rounded-circle shadow-sm mb-3" style="width: 180px; height: 180px; object-fit: cover;">
+                <img src="<?php echo htmlspecialchars($profile_pic_url); ?>" alt="Profile Picture" class="img-fluid rounded-circle shadow-sm mb-3" style="width: 180px; height: 180px; object-fit: cover;">
                 <h5 class="fw-bold"><?php echo htmlspecialchars(trim($student['first_name'] . ' ' . $student['last_name'])); ?></h5>
                 <p class="text-muted"><?php echo htmlspecialchars($student['user_email'] ?? ''); ?></p>
                 

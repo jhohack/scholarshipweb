@@ -452,7 +452,7 @@ include 'header.php';
                     <i class="bi bi-arrow-left fs-5"></i>
                 </button>
                 <div class="avatar-wrapper">
-                    <img src="../public/assets/images/default-avatar.png" id="headerAvatar" class="avatar" alt="User">
+                    <img src="<?php echo htmlspecialchars(defaultAvatarUrl('Student')); ?>" id="headerAvatar" class="avatar" alt="User">
                     <span class="status-indicator online"></span>
                 </div>
                 <div>
@@ -640,7 +640,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const studentId = activeItem.dataset.studentId;
         
         document.getElementById('headerName').textContent = name;
-        document.getElementById('headerAvatar').src = avatarPath || '../public/assets/images/default-avatar.png';
+        const defaultAvatar = <?php echo json_encode(defaultAvatarUrl('Student')); ?>;
+        document.getElementById('headerAvatar').src = avatarPath || defaultAvatar;
         document.getElementById('viewProfileLink').href = `users.php?search=${encodeURIComponent(name)}`; // Simple link to users
         
         document.getElementById('chatHeader').style.display = 'flex';

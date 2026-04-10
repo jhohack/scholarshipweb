@@ -71,9 +71,13 @@ if (isset($_SESSION['user_id']) && isset($_SESSION['role']) && $_SESSION['role']
                         <?php if (isset($_SESSION['user_id']) && !$isAdminViewing): ?>
                             <?php
                             // This block is for logged-in students only.
-                            $profile_pic_url = !empty($_SESSION['profile_picture_path'])
-                                ? storedFilePathToUrl($_SESSION['profile_picture_path'])
-                                : 'assets/images/default-avatar.png';
+                            $profile_pic_url = defaultAvatarUrl($_SESSION['name'] ?? 'Student');
+                            if (!empty($_SESSION['profile_picture_path'])) {
+                                $profile_image = describeStoredFile($pdo, $_SESSION['profile_picture_path'], dirname(__DIR__), $profile_pic_url);
+                                if (!empty($profile_image['url'])) {
+                                    $profile_pic_url = $profile_image['url'];
+                                }
+                            }
                             ?>
                             <a href="messages.php" class="btn btn-light rounded-circle me-3 position-relative border d-flex align-items-center justify-content-center nav-message-btn <?php echo ($unread_messages > 0) ? 'has-unread' : ''; ?>" style="width: 40px; height: 40px;" title="Messages" aria-label="Messages">
                                 <i class="bi bi-chat-dots-fill text-primary"></i>

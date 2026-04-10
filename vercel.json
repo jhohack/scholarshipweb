@@ -12,15 +12,7 @@
       "dest": "/public/assets/$1"
     },
     {
-      "src": "^/public/assets/(.*)$",
-      "dest": "/public/assets/$1"
-    },
-    {
       "src": "^/uploads/(.*)$",
-      "dest": "/public/uploads/$1"
-    },
-    {
-      "src": "^/public/uploads/(.*)$",
       "dest": "/public/uploads/$1"
     },
     {

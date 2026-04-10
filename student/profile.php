@@ -166,11 +166,15 @@ include 'header.php';
         <div class="row g-4">
             <div class="col-12 text-center mb-3">
                 <?php
-                    $avatar_path = !empty($student['profile_picture_path'])
-                        ? storedFilePathToUrl($student['profile_picture_path'])
-                        : 'https://i.pravatar.cc/150?u=' . rawurlencode((string) $user_id);
+                    $avatar_path = defaultAvatarUrl(trim(($student['first_name'] ?? '') . ' ' . ($student['last_name'] ?? '')));
+                    if (!empty($student['profile_picture_path'])) {
+                        $profile_image = describeStoredFile($pdo, $student['profile_picture_path'], $base_path, $avatar_path);
+                        if (!empty($profile_image['url'])) {
+                            $avatar_path = $profile_image['url'];
+                        }
+                    }
                 ?>
-                <img src="<?php echo $avatar_path; ?>" alt="Profile Picture" class="rounded-circle mb-3" width="150" height="150" style="object-fit: cover; border: 4px solid #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
+                <img src="<?php echo htmlspecialchars($avatar_path); ?>" alt="Profile Picture" class="rounded-circle mb-3" width="150" height="150" style="object-fit: cover; border: 4px solid #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
                 <div class="col-md-6 mx-auto">
                     <label for="profile_picture" class="form-label">Change Profile Picture</label>
                     <input class="form-control" type="file" id="profile_picture" name="profile_picture" accept="image/png, image/jpeg, image/gif">

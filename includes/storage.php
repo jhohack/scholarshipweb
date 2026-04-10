@@ -104,6 +104,52 @@ if (!function_exists('storedFilePathToUrl')) {
     }
 }
 
+if (!function_exists('defaultAvatarUrl')) {
+    function defaultAvatarUrl(?string $label = null): string
+    {
+        $label = trim((string) ($label ?? ''));
+        if ($label === '') {
+            $label = 'User';
+        }
+
+        $parts = preg_split('/\s+/', $label) ?: [];
+        $initials = '';
+        foreach ($parts as $part) {
+            $part = trim((string) $part);
+            if ($part === '') {
+                continue;
+            }
+
+            $initial = function_exists('mb_substr') ? mb_substr($part, 0, 1, 'UTF-8') : substr($part, 0, 1);
+            $initials .= function_exists('mb_strtoupper') ? mb_strtoupper($initial, 'UTF-8') : strtoupper($initial);
+
+            if (strlen($initials) >= 2) {
+                break;
+            }
+        }
+
+        if ($initials === '') {
+            $initials = 'U';
+        }
+
+        $safeInitials = htmlspecialchars($initials, ENT_QUOTES, 'UTF-8');
+        $svg = <<<SVG
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="{$safeInitials}">
+  <defs>
+    <linearGradient id="avatarGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d6efd"/>
+      <stop offset="100%" stop-color="#052c65"/>
+    </linearGradient>
+  </defs>
+  <rect width="120" height="120" rx="60" fill="url(#avatarGradient)"/>
+  <text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="700" fill="#ffffff">{$safeInitials}</text>
+</svg>
+SVG;
+
+        return 'data:image/svg+xml;charset=UTF-8,' . rawurlencode($svg);
+    }
+}
+
 if (!function_exists('storedFileExists')) {
     function storedFileExists(PDO $pdo, ?string $path, ?string $basePath = null): bool
     {

@@ -159,9 +159,13 @@ if (isset($_SESSION['user_id'])) {
                     <div class="dropdown user-dropdown">
                         <a href="#" class="d-flex align-items-center text-decoration-none dropdown-toggle" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                             <?php
-                                $profile_pic_path = !empty($_SESSION['profile_picture_path'])
-                                    ? storedFilePathToUrl($_SESSION['profile_picture_path'])
-                                    : 'https://i.pravatar.cc/40?u=' . rawurlencode((string) $_SESSION['user_id']);
+                                $profile_pic_path = defaultAvatarUrl($_SESSION['name'] ?? 'Student');
+                                if (!empty($_SESSION['profile_picture_path'])) {
+                                    $profile_image = describeStoredFile($pdo, $_SESSION['profile_picture_path'], $base_path, $profile_pic_path);
+                                    if (!empty($profile_image['url'])) {
+                                        $profile_pic_path = $profile_image['url'];
+                                    }
+                                }
                             ?>
                             <img src="<?php echo htmlspecialchars($profile_pic_path); ?>" alt="User" width="40" height="40" class="rounded-circle me-2" style="object-fit: cover;">
                             <div class="d-none d-md-block">
