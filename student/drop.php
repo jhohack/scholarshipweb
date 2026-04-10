@@ -5,6 +5,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 require_once $base_path . '/includes/db.php';
+require_once $base_path . '/includes/mailer.php';
 
 // --- Database Migration: Ensure 'remarks' column exists for drop reasons ---
 try {
@@ -90,24 +91,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && empty($errors)) {
             if ($student_info) {
                 $mail = new PHPMailer(true);
                 try {
-                    // Server settings
-                    $mail->isSMTP();
-                    $mail->Host       = SMTP_HOST;
-                    $mail->SMTPAuth   = true;
-                    $mail->Username   = SMTP_USER;
-                    $mail->Password   = SMTP_PASS;
-                    $mail->SMTPSecure = SMTP_SECURE;
-                    $mail->Port       = SMTP_PORT;
-                    $mail->SMTPOptions = array(
-                        'ssl' => array(
-                            'verify_peer' => false,
-                            'verify_peer_name' => false,
-                            'allow_self_signed' => true
-                        )
-                    );
+                    configureSmtpMailer($mail, 'DVC Scholarship Hub');
 
                     // Recipients
-                    $mail->setFrom(SMTP_USER, 'DVC Scholarship Hub');
                     $mail->addAddress($student_info['email'], $student_info['student_name']);
 
                     // Content
@@ -118,7 +104,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && empty($errors)) {
                     $mail->send();
                 } catch (Exception $e) {
                     // Log error but don't stop the process
-                    error_log("Mail error: " . $mail->ErrorInfo);
+                    error_log("Mail error: " . ($mail->ErrorInfo ?: $e->getMessage()));
                 }
             }
             
