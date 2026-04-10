@@ -137,7 +137,10 @@ if ($action === 'get_details' && isset($_GET['app_id'])) {
         $stmt->execute([$app_id]);
         $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
         foreach ($documents as &$document) {
-            $document['file_url'] = storedFilePathToUrl($document['file_path'] ?? '');
+            $fileInfo = describeStoredFile($pdo, $document['file_path'] ?? '', $base_path);
+            $document['file_url'] = $fileInfo['url'];
+            $document['file_exists'] = $fileInfo['exists'];
+            $document['file_status'] = $fileInfo['reason'];
         }
         unset($document);
 
@@ -1448,6 +1451,9 @@ displayFlashMessages();
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body p-0">
+                <div id="docPreviewMissingState" class="alert alert-warning m-3 d-none">
+                    This file is not available in the current storage yet.
+                </div>
                 <iframe id="docPreviewFrame" src="" style="width: 100%; height: 100%;" frameborder="0"></iframe>
             </div>
         </div>
@@ -1457,6 +1463,25 @@ displayFlashMessages();
 <script>
 const availablePrograms = <?php echo json_encode($distinct_programs ?? []); ?>;
 const availableYearLevels = <?php echo json_encode($distinct_year_levels ?? []); ?>;
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function bindDocumentPreviewButtons() {
+    document.querySelectorAll('.document-preview-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const url = decodeURIComponent(this.dataset.url || '');
+            const title = decodeURIComponent(this.dataset.title || 'Document');
+            viewDocument(url, title);
+        });
+    });
+}
 
 document.addEventListener('DOMContentLoaded', function() {
     // Move modal to body to prevent z-index/backdrop issues caused by AOS animations
@@ -1799,13 +1824,22 @@ function viewApplicant(appId) {
             if(data.documents.length > 0) {
                 data.documents.forEach(d => {
                     const fileUrl = d.file_url || '#';
+                    const fileName = d.file_name || 'Document';
+                    const encodedUrl = encodeURIComponent(fileUrl);
+                    const encodedTitle = encodeURIComponent(fileName);
+                    const unavailableNote = d.file_status === 'legacy_upload_missing'
+                        ? 'Legacy upload not found in current storage.'
+                        : 'File is unavailable.';
                     docHtml += `
                         <div class="col-md-6">
                             <div class="card h-100">
                                 <div class="card-body d-flex align-items-center">
                                     <i class="bi bi-file-earmark-pdf fs-2 text-danger me-3"></i>
                                     <div class="text-truncate">
-                                        <a href="#" onclick="viewDocument('${fileUrl}', '${d.file_name}'); return false;" class="text-decoration-none fw-bold stretched-link">${d.file_name}</a>
+                                        ${d.file_exists
+                                            ? `<button type="button" class="btn btn-link p-0 text-start text-decoration-none fw-bold stretched-link document-preview-btn" data-url="${encodedUrl}" data-title="${encodedTitle}">${escapeHtml(fileName)}</button>`
+                                            : `<div class="fw-bold text-muted">${escapeHtml(fileName)}</div><small class="text-warning">${escapeHtml(unavailableNote)}</small>`
+                                        }
                                     </div>
                                 </div>
                             </div>
@@ -1815,6 +1849,7 @@ function viewApplicant(appId) {
                 docHtml = '<p class="text-muted">No documents uploaded.</p>';
             }
             document.getElementById('documents-content').innerHTML = docHtml;
+            bindDocumentPreviewButtons();
 
             // Exam
             let examHtml = '';
@@ -1845,7 +1880,17 @@ function viewDocument(url, title) {
     const modalEl = document.getElementById('documentPreviewModal');
     const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
     document.getElementById('docPreviewTitle').innerText = title;
-    document.getElementById('docPreviewFrame').src = url;
+    const frame = document.getElementById('docPreviewFrame');
+    const missingState = document.getElementById('docPreviewMissingState');
+    if (!url || url === '#') {
+        frame.src = '';
+        frame.classList.add('d-none');
+        missingState.classList.remove('d-none');
+    } else {
+        frame.src = url;
+        frame.classList.remove('d-none');
+        missingState.classList.add('d-none');
+    }
     modal.show();
 }
 </script>

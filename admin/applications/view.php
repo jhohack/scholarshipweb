@@ -33,6 +33,13 @@ if ($applicationId) {
             $stmt = $pdo->prepare("SELECT file_name, file_path FROM documents WHERE application_id = ? ORDER BY id ASC");
             $stmt->execute([$applicationId]);
             $application['documents_list'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($application['documents_list'] as &$document) {
+                $fileInfo = describeStoredFile($pdo, $document['file_path'] ?? '', $base_path);
+                $document['file_url'] = $fileInfo['url'];
+                $document['file_exists'] = $fileInfo['exists'];
+                $document['file_status'] = $fileInfo['reason'];
+            }
+            unset($document);
         }
     } catch (PDOException $e) {
         $errors[] = "A database error occurred. Please try again later.";
@@ -79,9 +86,14 @@ if ($applicationId) {
                     <ul>
                         <?php foreach ($application['documents_list'] as $document): ?>
                             <li>
-                                <a href="<?php echo htmlspecialchars(storedFilePathToUrl($document['file_path'] ?? '')); ?>" target="_blank">
-                                    <?php echo htmlspecialchars($document['file_name'] ?? 'Document'); ?>
-                                </a>
+                                <?php if (!empty($document['file_exists'])): ?>
+                                    <a href="<?php echo htmlspecialchars($document['file_url'] ?? ''); ?>" target="_blank">
+                                        <?php echo htmlspecialchars($document['file_name'] ?? 'Document'); ?>
+                                    </a>
+                                <?php else: ?>
+                                    <span class="text-muted"><?php echo htmlspecialchars($document['file_name'] ?? 'Document'); ?></span>
+                                    <small class="text-warning">(legacy upload missing)</small>
+                                <?php endif; ?>
                             </li>
                         <?php endforeach; ?>
                     </ul>

@@ -17,6 +17,7 @@ async function main() {
   }
 
   const dryRun = process.argv.includes('--dry-run');
+  const legacyUploadBaseUrls = parseLegacyBaseUrls();
   const repoRoot = path.resolve(__dirname, '..');
   const publicRoot = path.join(repoRoot, 'public');
   const { Client } = loadPgModule();
@@ -76,6 +77,7 @@ async function main() {
       let converted = 0;
       let missing = 0;
       let skipped = 0;
+      let recoveredFromRemote = 0;
 
       for (const row of result.rows) {
         const relativePath = row[target.pathColumn];
@@ -89,7 +91,23 @@ async function main() {
           ? (row[target.nameColumn] || path.basename(relativePath))
           : path.basename(relativePath);
 
-        if (!fs.existsSync(absolutePath)) {
+        let buffer = null;
+        let mimeType = detectMimeType(absolutePath);
+        let sourceLabel = 'local';
+
+        if (fs.existsSync(absolutePath)) {
+          buffer = fs.readFileSync(absolutePath);
+        } else {
+          const remoteFile = await fetchLegacyFile(relativePath, legacyUploadBaseUrls);
+          if (remoteFile) {
+            buffer = remoteFile.buffer;
+            mimeType = remoteFile.mimeType || detectMimeType(relativePath);
+            sourceLabel = remoteFile.sourceUrl;
+            recoveredFromRemote++;
+          }
+        }
+
+        if (!buffer) {
           missing++;
           console.log(`  - Missing file for ${target.table}#${row[target.idColumn]}: ${relativePath}`);
           continue;
@@ -97,13 +115,11 @@ async function main() {
 
         if (dryRun) {
           converted++;
-          console.log(`  - Would migrate ${target.table}#${row[target.idColumn]}: ${relativePath}`);
+          console.log(`  - Would migrate ${target.table}#${row[target.idColumn]}: ${relativePath} (${sourceLabel})`);
           continue;
         }
 
-        const buffer = fs.readFileSync(absolutePath);
         const storageKey = crypto.randomBytes(16).toString('hex');
-        const mimeType = detectMimeType(absolutePath);
 
         await client.query(
           `INSERT INTO uploaded_files (storage_key, folder_name, original_name, mime_type, file_size, content_blob)
@@ -117,10 +133,10 @@ async function main() {
         );
 
         converted++;
-        console.log(`  - Migrated ${target.table}#${row[target.idColumn]} => filedb:${storageKey}`);
+        console.log(`  - Migrated ${target.table}#${row[target.idColumn]} => filedb:${storageKey} (${sourceLabel})`);
       }
 
-      console.log(`  Summary: ${converted} converted, ${missing} missing, ${skipped} skipped.`);
+      console.log(`  Summary: ${converted} converted, ${missing} missing, ${skipped} skipped, ${recoveredFromRemote} recovered remotely.`);
       console.log('');
     }
   } finally {
@@ -129,7 +145,7 @@ async function main() {
 }
 
 function detectMimeType(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
+  const ext = path.extname(String(filePath || '')).toLowerCase();
   switch (ext) {
     case '.jpg':
     case '.jpeg':
@@ -147,6 +163,87 @@ function detectMimeType(filePath) {
     default:
       return 'application/octet-stream';
   }
+}
+
+function parseLegacyBaseUrls() {
+  const raw = process.env.LEGACY_UPLOAD_BASE_URLS || process.env.LEGACY_UPLOAD_BASE_URL || '';
+  return raw
+    .split(',')
+    .map(value => value.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+}
+
+async function fetchLegacyFile(relativePath, baseUrls) {
+  if (!baseUrls.length) {
+    return null;
+  }
+
+  const cleanPath = String(relativePath || '').replace(/^\/+/, '');
+  for (const baseUrl of baseUrls) {
+    const url = `${baseUrl}/${cleanPath}`;
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const response = await fetch(url, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: controller.signal,
+        headers: {
+          'user-agent': 'scholarship-portal-migrator/1.0',
+        },
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const mimeType = sanitizeMimeType(response.headers.get('content-type'));
+      if (!isAcceptableRemoteFile(cleanPath, mimeType, buffer)) {
+        continue;
+      }
+
+      return {
+        buffer,
+        mimeType,
+        sourceUrl: url,
+      };
+    } catch (error) {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function sanitizeMimeType(value) {
+  if (!value) {
+    return '';
+  }
+
+  return String(value).split(';', 1)[0].trim().toLowerCase();
+}
+
+function isAcceptableRemoteFile(filePath, mimeType, buffer) {
+  if (!buffer || buffer.length === 0) {
+    return false;
+  }
+
+  const ext = path.extname(String(filePath || '')).toLowerCase();
+  const startsWithPdf = buffer.subarray(0, 5).toString('utf8') === '%PDF-';
+
+  if (ext === '.pdf') {
+    return mimeType === 'application/pdf' || startsWithPdf;
+  }
+
+  if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jfif'].includes(ext)) {
+    return mimeType.startsWith('image/');
+  }
+
+  return mimeType !== 'text/html';
 }
 
 main().catch((error) => {

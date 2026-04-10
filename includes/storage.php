@@ -104,6 +104,67 @@ if (!function_exists('storedFilePathToUrl')) {
     }
 }
 
+if (!function_exists('storedFileExists')) {
+    function storedFileExists(PDO $pdo, ?string $path, ?string $basePath = null): bool
+    {
+        if ($path === null || $path === '') {
+            return false;
+        }
+
+        if (strpos($path, 'filedb:') === 0) {
+            ensureUploadedFilesTable($pdo);
+            $storageKey = substr($path, 7);
+            $stmt = $pdo->prepare("SELECT 1 FROM uploaded_files WHERE storage_key = ? LIMIT 1");
+            $stmt->execute([$storageKey]);
+            return (bool) $stmt->fetchColumn();
+        }
+
+        if (isAbsoluteUrl($path)) {
+            return true;
+        }
+
+        if ($basePath === null || $basePath === '') {
+            return false;
+        }
+
+        if (strpos($path, 'uploads/') === 0) {
+            $absolutePath = rtrim($basePath, '/\\') . '/public/' . ltrim($path, '/');
+            return is_file($absolutePath);
+        }
+
+        $absolutePath = rtrim($basePath, '/\\') . '/' . ltrim($path, '/');
+        return is_file($absolutePath);
+    }
+}
+
+if (!function_exists('describeStoredFile')) {
+    function describeStoredFile(PDO $pdo, ?string $path, ?string $basePath = null, ?string $fallbackUrl = null): array
+    {
+        $url = storedFilePathToUrl($path, $fallbackUrl);
+        $exists = storedFileExists($pdo, $path, $basePath);
+
+        $reason = '';
+        if ($path === null || $path === '') {
+            $reason = 'missing_path';
+        } elseif (!$exists) {
+            if (strpos($path, 'filedb:') === 0) {
+                $reason = 'database_file_missing';
+            } elseif (strpos($path, 'uploads/') === 0) {
+                $reason = 'legacy_upload_missing';
+            } else {
+                $reason = 'file_missing';
+            }
+        }
+
+        return [
+            'path' => $path ?? '',
+            'url' => $url,
+            'exists' => $exists,
+            'reason' => $reason,
+        ];
+    }
+}
+
 if (!function_exists('deleteStoredFileByPath')) {
     function deleteStoredFileByPath(PDO $pdo, ?string $path, ?string $basePath = null): void
     {

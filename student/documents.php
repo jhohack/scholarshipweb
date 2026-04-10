@@ -52,6 +52,13 @@ try {
     $stmt = $pdo->prepare("SELECT * FROM documents WHERE user_id = ?");
     $stmt->execute([$user_id]);
     $documents = $stmt->fetchAll();
+    foreach ($documents as &$document) {
+        $fileInfo = describeStoredFile($pdo, $document['file_path'] ?? '', dirname(__DIR__));
+        $document['file_url'] = $fileInfo['url'];
+        $document['file_exists'] = $fileInfo['exists'];
+        $document['file_status'] = $fileInfo['reason'];
+    }
+    unset($document);
 } catch (PDOException $e) {
     $errors[] = "Error fetching documents: " . $e->getMessage();
 }
@@ -89,10 +96,18 @@ include 'header.php';
         <?php else: ?>
             <div class="list-group">
             <?php foreach ($documents as $document): ?>
-                <a href="<?php echo htmlspecialchars(storedFilePathToUrl($document['file_path'] ?? '')); ?>" target="_blank" class="list-group-item list-group-item-action">
-                    <i class="bi bi-file-earmark-pdf-fill text-danger me-2"></i>
-                    <?php echo htmlspecialchars($document['file_name']); ?>
-                </a>
+                <?php if (!empty($document['file_exists'])): ?>
+                    <a href="<?php echo htmlspecialchars($document['file_url'] ?? ''); ?>" target="_blank" class="list-group-item list-group-item-action">
+                        <i class="bi bi-file-earmark-pdf-fill text-danger me-2"></i>
+                        <?php echo htmlspecialchars($document['file_name']); ?>
+                    </a>
+                <?php else: ?>
+                    <div class="list-group-item">
+                        <i class="bi bi-file-earmark-x-fill text-warning me-2"></i>
+                        <?php echo htmlspecialchars($document['file_name']); ?>
+                        <div class="small text-warning mt-1">This legacy upload is not available in the current storage yet.</div>
+                    </div>
+                <?php endif; ?>
             <?php endforeach; ?>
             </div>
         <?php endif; ?>

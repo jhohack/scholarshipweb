@@ -442,12 +442,12 @@ function renderDynamicScholarshipTableSql(string $table, array $columns): string
         }
 
         if ($column === 'application_id') {
-            $definitions[] = '    ' . pgQuoteIdentifier($column) . ' INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED';
+            $definitions[] = '    ' . pgQuoteIdentifier($column) . ' INTEGER NOT NULL';
             continue;
         }
 
         if ($column === 'student_id') {
-            $definitions[] = '    ' . pgQuoteIdentifier($column) . ' INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED';
+            $definitions[] = '    ' . pgQuoteIdentifier($column) . ' INTEGER NOT NULL';
             continue;
         }
 
