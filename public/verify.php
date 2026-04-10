@@ -2,6 +2,7 @@
 $base_path = dirname(__DIR__);
 require_once $base_path . '/includes/config.php';
 require_once $base_path . '/includes/db.php';
+require_once $base_path . '/includes/mailer.php';
 
 // Include PHPMailer for resending email
 use PHPMailer\PHPMailer\PHPMailer;
@@ -40,26 +41,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
         // Resend the email
         $mail = new PHPMailer(true);
         try {
-            //Server settings
-            $mail->isSMTP();
-            $mail->Host       = SMTP_HOST;
-            $mail->SMTPAuth   = true;
-            $mail->Username   = SMTP_USER;
-            $mail->Password   = SMTP_PASS;
-            $mail->SMTPSecure = SMTP_SECURE;
-            $mail->Port       = SMTP_PORT;
-
-            // Bypass SSL verification for local development
-            $mail->SMTPOptions = array(
-                'ssl' => array(
-                    'verify_peer' => false,
-                    'verify_peer_name' => false,
-                    'allow_self_signed' => true
-                )
-            );
-
-            //Recipients
-            $mail->setFrom(SMTP_USER, 'DVC Scholarship Hub');
+            configureSmtpMailer($mail, 'DVC Scholarship Hub');
             $mail->addAddress($reg_data['email'], "{$reg_data['first_name']} {$reg_data['last_name']}");
 
             //Content
@@ -73,7 +55,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
             $_SESSION['last_resend_time'] = time();
             $success_message = "A new verification code has been sent to your email.";
         } catch (Exception $e) {
-            $errors[] = "Could not send verification email. Please contact support.";
+            $errors[] = mailConfigurationErrorMessage();
+            error_log("Mailer Error: " . ($mail->ErrorInfo ?: $e->getMessage()));
         }
     } else {
         $errors[] = "No pending registration found. Please register again.";

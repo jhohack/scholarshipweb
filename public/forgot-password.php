@@ -2,6 +2,7 @@
 $base_path = dirname(__DIR__);
 require_once $base_path . '/includes/config.php';
 require_once $base_path . '/includes/db.php';
+require_once $base_path . '/includes/mailer.php';
 
 // Include PHPMailer
 use PHPMailer\PHPMailer\PHPMailer;
@@ -36,26 +37,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 // --- Send Email with PHPMailer ---
                 $mail = new PHPMailer(true);
                 try {
-                    //Server settings
-                    $mail->isSMTP();
-                    $mail->Host       = SMTP_HOST;
-                    $mail->SMTPAuth   = true;
-                    $mail->Username   = SMTP_USER;
-                    $mail->Password   = SMTP_PASS;
-                    $mail->SMTPSecure = SMTP_SECURE;
-                    $mail->Port       = SMTP_PORT;
-
-                    // Bypass SSL verification for local development
-                    $mail->SMTPOptions = array(
-                        'ssl' => array(
-                            'verify_peer' => false,
-                            'verify_peer_name' => false,
-                            'allow_self_signed' => true
-                        )
-                    );
-
-                    //Recipients
-                    $mail->setFrom(SMTP_USER, 'DVC Scholarship Hub');
+                    configureSmtpMailer($mail, 'DVC Scholarship Hub');
                     $mail->addAddress($email);
 
                     //Content
@@ -67,10 +49,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     $mail->send();
                     $message = "If an account with that email exists, a password reset link has been sent.";
                 } catch (Exception $e) {
-                    $error = "Message could not be sent. Mailer Error: {$mail->ErrorInfo}";
-                    // In a real app, you would log this error instead of showing it to the user.
-                    // error_log("Mailer Error: {$mail->ErrorInfo}");
-                    // $error = "Could not send reset email. Please contact support.";
+                    $error = mailConfigurationErrorMessage();
+                    error_log("Mailer Error: " . ($mail->ErrorInfo ?: $e->getMessage()));
                 }
             } else {
                 // To prevent user enumeration, show the same message whether the user exists or not.

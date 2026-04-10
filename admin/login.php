@@ -6,6 +6,7 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/mailer.php';
 $base_path = dirname(__DIR__);
 
 // Check if user is already logged in
@@ -60,24 +61,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     // Send the code via email
                     $mail = new PHPMailer(true);
                     try {
-                        $mail->isSMTP();
-                        $mail->Host       = SMTP_HOST;
-                        $mail->SMTPAuth   = true;
-                        $mail->Username   = SMTP_USER;
-                        $mail->Password   = SMTP_PASS;
-                        $mail->SMTPSecure = SMTP_SECURE;
-                        $mail->Port       = SMTP_PORT;
-
-                        // Fix for SSL certificate verify failed error
-                        $mail->SMTPOptions = array(
-                            'ssl' => array(
-                                'verify_peer' => false,
-                                'verify_peer_name' => false,
-                                'allow_self_signed' => true
-                            )
-                        );
-
-                        $mail->setFrom(SMTP_USER, 'DVC Scholarship Hub Security');
+                        configureSmtpMailer($mail, 'DVC Scholarship Hub Security');
                         $mail->addAddress($user['email'], $user['first_name'] . ' ' . $user['last_name']);
                         $mail->isHTML(true);
                         $mail->Subject = 'Your Admin Login Verification Code';
@@ -89,8 +73,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         exit();
 
                     } catch (Exception $e) {
-                        $errors[] = "Could not send verification email. Mailer Error: " . $mail->ErrorInfo;
-                        error_log("Mailer Error: {$mail->ErrorInfo}");
+                        $errors[] = mailConfigurationErrorMessage();
+                        error_log("Mailer Error: " . ($mail->ErrorInfo ?: $e->getMessage()));
                     }
                 } else {
                     $errors[] = "Invalid credentials.";

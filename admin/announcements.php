@@ -9,6 +9,7 @@ require_once $base_path . '/includes/config.php';
 require_once $base_path . '/includes/db.php';
 require_once $base_path . '/includes/functions.php';
 require_once $base_path . '/includes/auth.php';
+require_once $base_path . '/includes/mailer.php';
 
 checkSessionTimeout();
 
@@ -290,15 +291,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $mail = new PHPMailer(true);
                         $sent_count = 0;
                         try {
-                            $mail->isSMTP();
-                            $mail->Host       = SMTP_HOST;
-                            $mail->SMTPAuth   = true;
-                            $mail->Username   = SMTP_USER;
-                            $mail->Password   = SMTP_PASS;
-                            $mail->SMTPSecure = SMTP_SECURE;
-                            $mail->Port       = SMTP_PORT;
-                            $mail->SMTPOptions = array('ssl' => array('verify_peer' => false, 'verify_peer_name' => false, 'allow_self_signed' => true));
-                            $mail->setFrom(SMTP_USER, 'DVC Scholarship Hub');
+                            configureSmtpMailer($mail, 'DVC Scholarship Hub');
                             $mail->isHTML(true);
 
                             // Handle File Attachment
@@ -335,7 +328,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             header("Location: announcements.php?action=email_blast");
                             exit();
                         } catch (Exception $e) {
-                            $errors[] = "Mailer Error: " . $mail->ErrorInfo;
+                            $errors[] = mailConfigurationErrorMessage();
+                            error_log("Mailer Error: " . ($mail->ErrorInfo ?: $e->getMessage()));
                         }
                     }
                 }

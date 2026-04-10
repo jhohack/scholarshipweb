@@ -9,6 +9,7 @@ require_once $base_path . '/includes/config.php';
 require_once $base_path . '/includes/db.php';
 require_once $base_path . '/includes/functions.php';
 require_once $base_path . '/includes/auth.php';
+require_once $base_path . '/includes/mailer.php';
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -342,16 +343,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
                 // 2. Send Email
                 $mail = new PHPMailer(true);
                 try {
-                    $mail->isSMTP();
-                    $mail->Host       = SMTP_HOST;
-                    $mail->SMTPAuth   = true;
-                    $mail->Username   = SMTP_USER;
-                    $mail->Password   = SMTP_PASS;
-                    $mail->SMTPSecure = SMTP_SECURE;
-                    $mail->Port       = SMTP_PORT;
-                    $mail->SMTPOptions = array('ssl' => array('verify_peer' => false, 'verify_peer_name' => false, 'allow_self_signed' => true));
-
-                    $mail->setFrom(SMTP_USER, 'DVC Scholarship Hub');
+                    configureSmtpMailer($mail, 'DVC Scholarship Hub');
                     $mail->addAddress($info['email'], $info['student_name']);
                     $mail->isHTML(true);
                     $mail->Subject = 'Application Status Update: ' . $info['scholarship_name'];
@@ -373,7 +365,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
                     $mail->Body = $body;
                     $mail->send();
                 } catch (Exception $e) {
-                    error_log("Mail error: " . $mail->ErrorInfo);
+                    error_log("Mail error: " . ($mail->ErrorInfo ?: $e->getMessage()));
                 }
             }
 

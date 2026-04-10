@@ -10,6 +10,7 @@ require_once $base_path . '/includes/config.php';
 require_once $base_path . '/includes/db.php';
 require_once $base_path . '/includes/functions.php';
 require_once $base_path . '/includes/auth.php';
+require_once $base_path . '/includes/mailer.php';
 
 // Include PHPMailer for email notifications
 use PHPMailer\PHPMailer\PHPMailer;
@@ -164,24 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!empty($students_to_notify)) {
                         $mail = new PHPMailer(true);
                         try {
-                            // Server settings
-                            $mail->isSMTP();
-                            $mail->Host       = SMTP_HOST;
-                            $mail->SMTPAuth   = true;
-                            $mail->Username   = SMTP_USER;
-                            $mail->Password   = SMTP_PASS;
-                            $mail->SMTPSecure = SMTP_SECURE;
-                            $mail->Port       = SMTP_PORT;
-                            
-                            $mail->SMTPOptions = array(
-                                'ssl' => array(
-                                    'verify_peer' => false,
-                                    'verify_peer_name' => false,
-                                    'allow_self_signed' => true
-                                )
-                            );
-
-                            $mail->setFrom(SMTP_USER, 'DVC Scholarship Hub');
+                            configureSmtpMailer($mail, 'DVC Scholarship Hub');
                             $mail->isHTML(true);
                             $mail->Subject = 'Action Required: Scholarship Renewal';
 
@@ -194,7 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 $mail->send();
                             }
                         } catch (Exception $e) {
-                            error_log("Mail error during bulk renewal: " . $mail->ErrorInfo);
+                            error_log("Mail error during bulk renewal: " . ($mail->ErrorInfo ?: $e->getMessage()));
                         }
                     }
 
