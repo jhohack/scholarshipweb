@@ -1,0 +1,24 @@
+{
+  "name": "DVC Scholarship Portal",
+  "short_name": "DVC Portal",
+  "description": "Find and apply for scholarships at Davao Vision College.",
+  "start_url": "./index.php",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0d6efd",
+  "icons": [
+    {
+      "src": "images/dvclogo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "images/dvclogo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

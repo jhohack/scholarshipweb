@@ -1,0 +1,186 @@
+/* ===== ADMIN DASHBOARD STYLES ===== */
+:root {
+    --sidebar-bg: #111827;
+    --sidebar-text: #9ca3af;
+    --sidebar-text-hover: #ffffff;
+    --sidebar-active-bg: rgba(59, 130, 246, 0.1);
+    --sidebar-active-indicator: #3b82f6;
+    --content-bg: #f9fafb;
+    --sidebar-width-expanded: 260px;
+    --sidebar-width-collapsed: 80px;
+    --header-height: 70px;
+}
+
+.admin-body {
+    display: flex;
+    background-color: var(--content-bg);
+}
+
+/* Sidebar */
+.sidebar {
+    width: var(--sidebar-width-expanded);
+    height: 100vh;
+    background-color: var(--sidebar-bg);
+    position: fixed;
+    top: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1000;
+}
+
+.sidebar-header {
+    padding: 1.25rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: #fff;
+    text-decoration: none;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.sidebar-brand .bi {
+    font-size: 1.5rem;
+    color: var(--sidebar-active-indicator);
+}
+
+.sidebar-nav {
+    list-style: none;
+    padding: 1rem 0;
+    margin: 0;
+    flex-grow: 1;
+}
+
+.sidebar-link {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem 1.5rem;
+    color: var(--sidebar-text);
+    text-decoration: none;
+    margin: 0.25rem 0.75rem;
+    border-radius: 0.5rem;
+    position: relative;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.sidebar-link:hover {
+    background-color: var(--sidebar-active-bg);
+    color: var(--sidebar-text-hover);
+}
+
+.sidebar-link.active {
+    background-color: var(--sidebar-active-bg);
+    color: var(--sidebar-text-hover);
+    font-weight: 600;
+}
+
+.sidebar-link.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 60%;
+    width: 4px;
+    background-color: var(--sidebar-active-indicator);
+    border-radius: 0 4px 4px 0;
+}
+
+.sidebar-link .bi {
+    font-size: 1.2rem;
+    min-width: 30px;
+    text-align: center;
+    margin-right: 1rem;
+    transition: transform 0.2s ease;
+}
+
+.sidebar-link:hover .bi {
+    transform: scale(1.1);
+}
+
+.sidebar-footer {
+    padding: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-toggle {
+    background: none;
+    border: none;
+    color: var(--sidebar-text);
+    font-size: 1.25rem;
+    cursor: pointer;
+    padding: 0.5rem;
+    transition: transform 0.3s ease;
+}
+
+/* Collapsed State */
+.sidebar[data-collapsed="true"] {
+    width: var(--sidebar-width-collapsed);
+}
+.sidebar[data-collapsed="true"] .sidebar-brand-text,
+.sidebar[data-collapsed="true"] .sidebar-link-text {
+    opacity: 0;
+    width: 0;
+    overflow: hidden;
+}
+.sidebar[data-collapsed="true"] .sidebar-toggle i {
+    transform: rotate(180deg);
+}
+
+/* Main Content */
+.main-content {
+    margin-left: var(--sidebar-width-expanded);
+    width: calc(100% - var(--sidebar-width-expanded));
+    transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar[data-collapsed="true"] + .main-content {
+    margin-left: var(--sidebar-width-collapsed);
+    width: calc(100% - var(--sidebar-width-collapsed));
+}
+
+.main-header {
+    height: var(--header-height);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 2rem;
+    background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.sidebar-toggle-mobile {
+    display: none;
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+}
+
+/* Mobile Styles */
+@media (max-width: 992px) {
+    .sidebar {
+        left: calc(-1 * var(--sidebar-width-expanded));
+        transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .sidebar.is-open {
+        left: 0;
+    }
+    .main-content {
+        margin-left: 0;
+        width: 100%;
+    }
+    .sidebar-toggle {
+        display: none;
+    }
+    .sidebar-toggle-mobile {
+        display: block;
+        margin-right: auto;
+    }
+}
