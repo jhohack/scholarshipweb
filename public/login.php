@@ -88,22 +88,44 @@ $page_title = 'Login';
         <i class="bi bi-arrow-left"></i>
     </a>
     <main>
-        <section class="auth-section d-flex align-items-center" style="min-height: 100vh;">
+        <section class="auth-section auth-hero-shell d-flex align-items-center" style="min-height: 100vh;">
             <div class="container">
                 <div class="row justify-content-center">
                     <div class="col-lg-10 col-xl-9">
-                        <div class="card-group auth-card">
+                        <div class="card-group auth-card auth-login-card">
                             <!-- Left Side: Branding -->
-                            <div class="col-lg-6 card p-5 d-none d-lg-flex flex-column justify-content-center auth-card-branding" data-aos="fade-right" id="auth-branding">
-                                <div class="text-center text-white">
-                                    <i class="bi bi-mortarboard-fill display-3 mb-3"></i>
-                                    <h2 class="fw-bold">DVC Scholarship Hub</h2>
-                                    <p class="lead">Your gateway to new opportunities and a brighter future.</p>
+                            <div class="col-lg-6 card p-5 d-none d-lg-flex flex-column justify-content-center auth-card-branding auth-brand-panel" data-aos="fade-right" id="auth-branding">
+                                <div class="text-white">
+                                    <div class="auth-brand-mark mb-4">
+                                        <span class="auth-brand-icon"><i class="bi bi-mortarboard-fill"></i></span>
+                                        <div>
+                                            <div class="auth-kicker text-white-50">Student Portal</div>
+                                            <h2 class="fw-bold mb-0">DVC Scholarship Hub</h2>
+                                        </div>
+                                    </div>
+                                    <p class="lead mb-4">Log in to track applications, receive announcements, and manage your scholarship journey in one place.</p>
+                                    <div class="auth-feature-list">
+                                        <div class="auth-feature-item">
+                                            <i class="bi bi-shield-check"></i>
+                                            <span>Secure student access</span>
+                                        </div>
+                                        <div class="auth-feature-item">
+                                            <i class="bi bi-journal-check"></i>
+                                            <span>Easy application tracking</span>
+                                        </div>
+                                        <div class="auth-feature-item">
+                                            <i class="bi bi-chat-dots"></i>
+                                            <span>Direct portal updates and support</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <!-- Right Side: Form -->
-                            <div class="col-lg-6 card p-5" data-aos="fade-left" id="auth-form-container">
-                                <h2 class="text-center mb-4 fw-bold">Welcome Back</h2>
+                            <div class="col-lg-6 card p-5 auth-form-panel" data-aos="fade-left" id="auth-form-container">
+                                <div class="auth-form-shell">
+                                    <div class="auth-kicker text-primary text-center">Student Login</div>
+                                    <h2 class="text-center mb-2 fw-bold">Welcome Back</h2>
+                                    <p class="text-center text-muted mb-4">Use your student account to continue to the portal.</p>
                                 <?php if (isset($_GET['registered']) && $_GET['registered'] === 'success'): ?>
                                     <div class="alert alert-success">
                                         Registration successful! You can now log in.
@@ -124,31 +146,36 @@ $page_title = 'Login';
                                         <?php echo $error; // Allow HTML for the verification link ?>
                                     </div>
                                 <?php endif; ?>
-                                <form action="login.php" method="POST">
+                                <form action="login.php" method="POST" class="auth-form-card">
                                     <div class="mb-3">
                                         <label for="email" class="form-label">Email Address</label>
-                                        <input type="email" class="form-control" id="email" name="email" value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>" required>
+                                        <div class="input-group auth-input-group">
+                                            <span class="input-group-text"><i class="bi bi-envelope"></i></span>
+                                            <input type="email" class="form-control" id="email" name="email" value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>" placeholder="Enter your email address" required>
+                                        </div>
                                     </div>
                                     <div class="mb-3">
                                         <label for="password" class="form-label">Password</label>
-                                        <div class="input-group">
-                                            <input type="password" class="form-control" id="password" name="password" required>
-                                            <button class="btn btn-outline-secondary" type="button" id="togglePassword" aria-label="Toggle password visibility">
+                                        <div class="input-group auth-input-group">
+                                            <span class="input-group-text"><i class="bi bi-lock"></i></span>
+                                            <input type="password" class="form-control" id="password" name="password" placeholder="Enter your password" required>
+                                            <button class="btn btn-outline-secondary password-toggle-btn" type="button" id="togglePassword" aria-label="Toggle password visibility">
                                                 <i class="bi bi-eye-slash"></i>
                                             </button>
                                         </div>
                                     </div>
                                     <div class="d-grid mt-4">
-                                        <button type="submit" class="btn btn-primary btn-lg" id="submit-btn">Login</button>
+                                        <button type="submit" class="btn btn-primary btn-lg rounded-pill" id="submit-btn">Login to Portal</button>
                                     </div>
                                 </form>
-                                <div class="text-center mt-4 text-muted small">
-                                    <p class="mb-1">
+                                <div class="auth-helper-links text-center mt-4 text-muted small">
+                                    <p class="mb-2">
                                         <a href="forgot-password.php">Forgot Password?</a>
                                     </p>
                                     <p class="mb-0">
                                         Don't have an account? <a href="register.php">Sign up here</a>
                                     </p>
+                                </div>
                                 </div>
                             </div>
                         </div>

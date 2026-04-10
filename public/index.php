@@ -197,11 +197,24 @@ $page_title = 'DVC Scholarship Hub';
         <!-- Hero Section -->
         <section class="hero d-flex align-items-center text-white position-relative">
             <div class="hero-grid-overlay"></div>
+            <div class="hero-glow" aria-hidden="true"></div>
             <div class="container text-center position-relative">
                 <div class="hero-content">
+                    <div class="hero-kicker" data-aos="zoom-in" data-aos-delay="50">Davao Vision College Scholarship Portal</div>
                     <h1 class="display-3 fw-bold hero-text mb-3" data-aos="zoom-in" style="letter-spacing: -1px;">Welcome to the DVC Scholarship Portal</h1>
                     <p class="lead col-lg-8 mx-auto my-4 hero-text" data-aos="zoom-in" data-aos-delay="200">Discover scholarships from Davao Vision College that match your ambitions and fund your educational journey.</p>
-                    <a href="scholarships.php" class="btn btn-light btn-lg fw-bold mt-3 hero-button" data-aos="zoom-in" data-aos-delay="400">Explore Scholarships</a>
+                    <div class="hero-actions d-flex flex-column flex-sm-row justify-content-center align-items-center gap-3 mt-3" data-aos="zoom-in" data-aos-delay="400">
+                        <a href="scholarships.php" class="btn btn-light btn-lg fw-bold hero-button">Explore Scholarships</a>
+                        <a href="register.php" class="btn btn-outline-light btn-lg fw-semibold rounded-pill px-4">Create an Account</a>
+                    </div>
+                    <div class="hero-stat-pills mt-4" data-aos="zoom-in" data-aos-delay="500">
+                        <span class="hero-stat-pill"><i class="bi bi-award-fill"></i><?php echo number_format($trust_stats['scholarships']); ?> active scholarships</span>
+                        <span class="hero-stat-pill"><i class="bi bi-people-fill"></i><?php echo number_format($trust_stats['students']); ?> student accounts</span>
+                        <span class="hero-stat-pill"><i class="bi bi-graph-up-arrow"></i><?php echo $trust_stats['success_rate']; ?>% assisted success rate</span>
+                    </div>
+                    <div class="hero-note mt-3" data-aos="zoom-in" data-aos-delay="600">
+                        Incoming, continuing, and renewal applicants can manage everything from one portal.
+                    </div>
                 </div>
             </div>
             <div class="section-divider section-divider-angle"></div>
