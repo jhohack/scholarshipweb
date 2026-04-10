@@ -45,6 +45,33 @@ if ($realRoot === false || $realTarget === false || strpos($realTarget, $realRoo
     exit('Forbidden.');
 }
 
+$targetExtension = strtolower(pathinfo($realTarget, PATHINFO_EXTENSION));
+if ($targetExtension !== 'php') {
+    $mimeTypes = [
+        'css' => 'text/css; charset=UTF-8',
+        'js' => 'application/javascript; charset=UTF-8',
+        'json' => 'application/json; charset=UTF-8',
+        'txt' => 'text/plain; charset=UTF-8',
+        'svg' => 'image/svg+xml',
+        'png' => 'image/png',
+        'jpg' => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'gif' => 'image/gif',
+        'webp' => 'image/webp',
+        'ico' => 'image/x-icon',
+        'woff' => 'font/woff',
+        'woff2' => 'font/woff2',
+        'ttf' => 'font/ttf',
+        'eot' => 'application/vnd.ms-fontobject',
+        'pdf' => 'application/pdf',
+    ];
+
+    header('Content-Type: ' . ($mimeTypes[$targetExtension] ?? 'application/octet-stream'));
+    header('Cache-Control: public, max-age=3600');
+    readfile($realTarget);
+    exit();
+}
+
 $originalPhpSelf = $_SERVER['PHP_SELF'] ?? null;
 $originalScriptName = $_SERVER['SCRIPT_NAME'] ?? null;
 $originalScriptFilename = $_SERVER['SCRIPT_FILENAME'] ?? null;
