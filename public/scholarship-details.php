@@ -65,6 +65,26 @@ $page_title = htmlspecialchars($scholarship['name']);
 $deadline = new DateTime($scholarship['deadline']);
 $now = new DateTime();
 $is_open = $now <= $deadline;
+$accepting_new_applicants = !empty($scholarship['accepting_new_applicants']);
+$accepting_renewal_applicants = !empty($scholarship['accepting_renewal_applicants']);
+$apply_button_label = $is_renewal_applicant ? 'Renew Scholarship' : 'Apply Now';
+$apply_button_href = 'apply.php?id=' . $scholarship['id'];
+$can_submit_current_user = false;
+$application_notice = '';
+
+if ($is_renewal_applicant) {
+    $can_submit_current_user = $accepting_renewal_applicants;
+    if (!$can_submit_current_user) {
+        $application_notice = 'Renewal applications are currently closed for this scholarship.';
+    }
+} else {
+    $can_submit_current_user = $scholarship['status'] === 'active' && $is_open && $accepting_new_applicants;
+    if (!$accepting_new_applicants) {
+        $application_notice = 'This scholarship is not accepting new applicants right now.';
+    } elseif (!$is_open) {
+        $application_notice = 'The deadline for new applicants has already passed.';
+    }
+}
 
 ?>
 <!DOCTYPE html>
@@ -186,10 +206,19 @@ $is_open = $now <= $deadline;
                             </li>
                         </ul>
                         <div class="d-grid mt-4">
-                            <a href="apply.php?id=<?php echo $scholarship['id']; ?><?php echo $is_renewal_applicant ? '&type=Renewal' : ''; ?>" class="btn btn-primary btn-lg <?php echo (!$is_open && !$is_renewal_applicant) ? 'disabled' : ''; ?>">
-                                <i class="bi bi-pencil-square me-2"></i>Apply Now
-                            </a>
+                            <?php if ($can_submit_current_user): ?>
+                                <a href="<?php echo htmlspecialchars($apply_button_href); ?>" class="btn btn-primary btn-lg">
+                                    <i class="bi bi-pencil-square me-2"></i><?php echo htmlspecialchars($apply_button_label); ?>
+                                </a>
+                            <?php else: ?>
+                                <button type="button" class="btn btn-primary btn-lg" disabled>
+                                    <i class="bi bi-pencil-square me-2"></i><?php echo htmlspecialchars($apply_button_label); ?>
+                                </button>
+                            <?php endif; ?>
                         </div>
+                        <?php if ($application_notice !== ''): ?>
+                            <p class="small text-muted mt-3 mb-0"><?php echo htmlspecialchars($application_notice); ?></p>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>

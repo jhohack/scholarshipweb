@@ -1,6 +1,5 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) {
-    session_name('scholarship_student');
     session_start();
 }
 
@@ -18,62 +17,68 @@ try {
         $pdo->exec("ALTER TABLE scholarships ADD COLUMN exam_duration INT DEFAULT 60");
     }
 
-    // Create exam_submissions table
-    $pdo->exec("CREATE TABLE IF NOT EXISTS exam_submissions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        student_id INT NOT NULL,
-        scholarship_id INT NOT NULL,
-        score INT DEFAULT 0,
-        total_items INT DEFAULT 0,
-        status ENUM('in_progress', 'submitted', 'graded') DEFAULT 'in_progress',
-        start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        end_time TIMESTAMP NULL,
-        FOREIGN KEY (scholarship_id) REFERENCES scholarships(id) ON DELETE CASCADE
-    )");
-
-    // Create exam_answers table
-    $pdo->exec("CREATE TABLE IF NOT EXISTS exam_answers (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        submission_id INT NOT NULL,
-        question_id INT NOT NULL,
-        student_answer TEXT,
-        is_correct TINYINT(1) DEFAULT 0,
-        FOREIGN KEY (submission_id) REFERENCES exam_submissions(id) ON DELETE CASCADE,
-        FOREIGN KEY (question_id) REFERENCES exam_questions(id) ON DELETE CASCADE
-    )");
-
-    // Create notifications table (Safety check)
-    $pdo->exec("CREATE TABLE IF NOT EXISTS notifications (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        student_id INT NOT NULL,
-        title VARCHAR(255) DEFAULT 'System Notification',
-        message TEXT,
-        is_read TINYINT(1) DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
-    )");
-
-    // Migration: Ensure title column exists
-    try {
-        $pdo->query("SELECT title FROM notifications LIMIT 1");
-    } catch (PDOException $e) {
-        $pdo->exec("ALTER TABLE notifications ADD COLUMN title VARCHAR(255) DEFAULT 'System Notification'");
-    }
+    dbEnsureExamSchema($pdo);
+    dbEnsureNotificationsTable($pdo);
 } catch (PDOException $e) {
     die("Database setup error: " . $e->getMessage());
 }
 
 // --- 2. Authentication & Validation ---
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'student') {
-    header("Location: ../login.php");
+checkSessionTimeout();
+
+if (!isStudent()) {
+    header("Location: ../public/login.php");
     exit();
 }
 
-$student_id = $_SESSION['user_id'];
 $scholarship_id = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_NUMBER_INT);
 
 if (!$scholarship_id) {
-    die("Invalid scholarship ID.");
+    flashMessage("Invalid scholarship exam request.");
+    header("Location: dashboard.php");
+    exit();
+}
+
+// Legacy compatibility route: move students into the application-based exam flow.
+try {
+    $student_stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
+    $student_stmt->execute([$_SESSION['user_id']]);
+    $student_id = $student_stmt->fetchColumn();
+
+    if (!$student_id) {
+        flashMessage("Student profile not found.");
+        header("Location: dashboard.php");
+        exit();
+    }
+
+    $application_stmt = $pdo->prepare("
+        SELECT id, status
+        FROM applications
+        WHERE student_id = ? AND scholarship_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+    ");
+    $application_stmt->execute([$student_id, $scholarship_id]);
+    $application = $application_stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$application) {
+        flashMessage("You must apply for this scholarship first.");
+        header("Location: dashboard.php");
+        exit();
+    }
+
+    if ($application['status'] !== 'Pending Exam') {
+        flashMessage("Cannot access exam. Current status: " . ($application['status'] ?: 'Invalid/Empty'));
+        header("Location: dashboard.php");
+        exit();
+    }
+
+    header("Location: ../public/entrance-exam.php?id=" . $application['id']);
+    exit();
+} catch (PDOException $e) {
+    flashMessage("Unable to open the exam right now. Please try again.");
+    header("Location: dashboard.php");
+    exit();
 }
 
 // Fetch Scholarship Details
@@ -104,9 +109,11 @@ $duration_seconds = ($scholarship['exam_duration'] ?: 60) * 60;
 
 if (!$submission) {
     // Start new exam
-    $stmt = $pdo->prepare("INSERT INTO exam_submissions (student_id, scholarship_id, start_time, status) VALUES (?, ?, NOW(), 'in_progress')");
-    $stmt->execute([$student_id, $scholarship_id]);
-    $submission_id = $pdo->lastInsertId();
+    $submission_id = dbExecuteInsert(
+        $pdo,
+        "INSERT INTO exam_submissions (student_id, scholarship_id, start_time, status) VALUES (?, ?, CURRENT_TIMESTAMP, 'in_progress')",
+        [$student_id, $scholarship_id]
+    );
     $start_time = time();
 } else {
     // Resume existing exam
@@ -207,7 +214,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_exam'])) {
     $final_status = $needs_manual_review ? 'submitted' : 'graded'; // 'submitted' implies pending review
 
     // Update Submission
-    $update_sub = $pdo->prepare("UPDATE exam_submissions SET score = ?, total_items = ?, status = ?, end_time = NOW() WHERE id = ?");
+    $update_sub = $pdo->prepare("UPDATE exam_submissions SET score = ?, total_items = ?, status = ?, end_time = CURRENT_TIMESTAMP WHERE id = ?");
     $update_sub->execute([$score, $total_items, $final_status, $submission_id]);
 
     // Update Application Status

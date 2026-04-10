@@ -21,143 +21,23 @@ require $base_path . '/vendor/autoload.php';
 checkSessionTimeout();
 
 // --- Database Setup: Automatic Table & Column Creation ---
-try {
-    // 1. Create forms table
-    $pdo->exec("CREATE TABLE IF NOT EXISTS forms (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        scholarship_id INT NOT NULL,
-        title VARCHAR(255),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (scholarship_id) REFERENCES scholarships(id) ON DELETE CASCADE
-    )");
+dbEnsureFormsSchema($pdo);
+dbEnsureExamSchema($pdo);
+dbEnsureScholarshipColumns($pdo);
+dbEnsureApplicationsSchema($pdo);
 
-    // 2. Create form_fields table
-    $pdo->exec("CREATE TABLE IF NOT EXISTS form_fields (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        form_id INT NOT NULL,
-        field_label VARCHAR(255) NOT NULL,
-        field_name VARCHAR(255) NOT NULL,
-        field_type VARCHAR(50) NOT NULL,
-        is_required TINYINT(1) DEFAULT 1,
-        options TEXT DEFAULT NULL,
-        field_order INT DEFAULT 0,
-        FOREIGN KEY (form_id) REFERENCES forms(id) ON DELETE CASCADE
-    )");
-
-    // 3. Create application_responses table (Critical for student submissions)
-    $pdo->exec("CREATE TABLE IF NOT EXISTS application_responses (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        application_id INT NOT NULL,
-        form_field_id INT NOT NULL,
-        response_value TEXT,
-        FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE,
-        FOREIGN KEY (form_field_id) REFERENCES form_fields(id) ON DELETE CASCADE
-    )");
-
-    // 4. Migration: Check if 'options' column exists in form_fields
-    // This ensures that if you added the 'options' feature later, the DB updates automatically.
-    $pdo->query("SELECT options FROM form_fields LIMIT 1");
-} catch (PDOException $e) {
-    // If the SELECT fails, it means the column likely doesn't exist. Add it.
-    try { 
-        $pdo->exec("ALTER TABLE form_fields ADD COLUMN options TEXT DEFAULT NULL"); 
-    } catch (Exception $ex) {
-        // Column might already exist or another error occurred
+if (dbIsMysql($pdo)) {
+    try {
+        $pdo->exec("ALTER TABLE applications MODIFY COLUMN status VARCHAR(50) DEFAULT 'Pending'");
+    } catch (PDOException $e) {
+        // Already migrated or using a flexible type.
     }
-}
 
-// 5. Ensure 'field_order' column exists (for reordering fields)
-try {
-    $pdo->query("SELECT field_order FROM form_fields LIMIT 1");
-} catch (PDOException $e) {
-    try { $pdo->exec("ALTER TABLE form_fields ADD COLUMN field_order INT DEFAULT 0"); } catch (Exception $ex) {}
-}
-
-// 6. Create exam_questions table (For the Entrance Exam)
-try {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS exam_questions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        scholarship_id INT NOT NULL,
-        question_text TEXT NOT NULL,
-        question_type ENUM('multiple_choice', 'situational') NOT NULL,
-        options TEXT, -- Stores options for MC (e.g., A. Option 1|B. Option 2)
-        correct_answer TEXT, -- Stores correct letter for MC or Key Answer for Situational
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (scholarship_id) REFERENCES scholarships(id) ON DELETE CASCADE
-    )");
-} catch (PDOException $e) {
-    // Table might exist
-}
-
-// 7. Migration: Ensure 'applications' table status column supports 'Pending Exam'
-// If status is an ENUM that doesn't include 'Pending Exam', inserts will fail (empty string).
-// We convert it to VARCHAR(50) to be safe and flexible.
-try {
-    $pdo->exec("ALTER TABLE applications MODIFY COLUMN status VARCHAR(50) DEFAULT 'Pending'");
-} catch (PDOException $e) {
-    // Column might already be VARCHAR or other error. 
-}
-
-// 7.1 Migration: Add 'remarks' column to applications (For Drop Reasons / Rejection Notes)
-try {
-    $pdo->query("SELECT remarks FROM applications LIMIT 1");
-} catch (PDOException $e) {
-    $pdo->exec("ALTER TABLE applications ADD COLUMN remarks TEXT DEFAULT NULL");
-}
-
-// 8. Migration: Add 'requires_exam' flag to scholarships table
-try {
-    $pdo->query("SELECT requires_exam FROM scholarships LIMIT 1");
-} catch (PDOException $e) {
-    // If it fails, the column doesn't exist. Add it.
-    $pdo->exec("ALTER TABLE scholarships ADD COLUMN requires_exam TINYINT(1) NOT NULL DEFAULT 0");
-}
-
-// 9. Migration: Make exam_questions.question_type more flexible
-try {
-    // This will allow storing new question types like 'Essay', 'Identification', etc.
-    $pdo->exec("ALTER TABLE exam_questions MODIFY COLUMN question_type VARCHAR(50) NOT NULL");
-} catch (PDOException $e) {
-    // Ignore if it fails (e.g., already varchar)
-}
-
-// 10. Migration: Add 'passing_score' to scholarships
-try {
-    $pdo->query("SELECT passing_score FROM scholarships LIMIT 1");
-} catch (PDOException $e) {
-    // Default passing score 75%
-    $pdo->exec("ALTER TABLE scholarships ADD COLUMN passing_score INT DEFAULT 75");
-}
-
-// 11. Migration: Add 'exam_duration' to scholarships
-try {
-    $pdo->query("SELECT exam_duration FROM scholarships LIMIT 1");
-} catch (PDOException $e) {
-    // Default duration 60 minutes
-    $pdo->exec("ALTER TABLE scholarships ADD COLUMN exam_duration INT DEFAULT 60");
-}
-
-// 12. Migration: Add 'end_of_term' date for automatic expiration
-try {
-    $pdo->query("SELECT end_of_term FROM scholarships LIMIT 1");
-} catch (PDOException $e) {
-    // If it fails, the column doesn't exist. Add it.
-    $pdo->exec("ALTER TABLE scholarships ADD COLUMN end_of_term DATE NULL DEFAULT NULL");
-}
-
-// 13. Migration: Add profile_picture_path to users table
-try {
-    $pdo->query("SELECT profile_picture_path FROM users LIMIT 1");
-} catch (PDOException $e) {
-    // If it fails, the column doesn't exist. Add it.
-    $pdo->exec("ALTER TABLE users ADD COLUMN profile_picture_path VARCHAR(255) NULL DEFAULT NULL");
-}
-
-// 14. Migration: Add amount_type to scholarships table
-try {
-    $pdo->query("SELECT amount_type FROM scholarships LIMIT 1");
-} catch (PDOException $e) {
-    $pdo->exec("ALTER TABLE scholarships ADD COLUMN amount_type ENUM('Peso', 'Percentage', 'None') NOT NULL DEFAULT 'Peso'");
+    try {
+        $pdo->exec("ALTER TABLE exam_questions MODIFY COLUMN question_type VARCHAR(50) NOT NULL");
+    } catch (PDOException $e) {
+        // Already migrated or using a flexible type.
+    }
 }
 
 // Check if the user is an admin
@@ -222,9 +102,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $success = "Scholarship updated successfully!";
                     } else { // Insert new
                         // Default status inactive, requires_exam 0 (will be decided in next step)
-                        $stmt = $pdo->prepare("INSERT INTO scholarships (name, description, benefits, requirements, application_requirements, amount, amount_type, deadline, available_slots, category, status, accepting_new_applicants, accepting_renewal_applicants, end_of_term) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'inactive', ?, ?, ?)");
-                        $stmt->execute([$name, $description, $benefits, $requirements, $application_requirements, $amount, $amount_type, $deadline, $available_slots, $category, $accepting_new, $accepting_renewal, $end_of_term]);
-                        $new_id = $pdo->lastInsertId();
+                        $new_id = dbExecuteInsert(
+                            $pdo,
+                            "INSERT INTO scholarships (name, description, benefits, requirements, application_requirements, amount, amount_type, deadline, available_slots, category, status, accepting_new_applicants, accepting_renewal_applicants, end_of_term) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'inactive', ?, ?, ?)",
+                            [$name, $description, $benefits, $requirements, $application_requirements, $amount, $amount_type, $deadline, $available_slots, $category, $accepting_new, $accepting_renewal, $end_of_term]
+                        );
                         $success = "Scholarship created successfully!";
                         header("Location: scholarships.php?action=list&prompt_exam=" . $new_id . "&success=" . urlencode($success));
                         exit();
@@ -271,12 +153,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $students_to_notify = $notify_stmt->fetchAll(PDO::FETCH_ASSOC);
 
                     // 1. Set Active students to 'For Renewal' so they know they need to re-apply
-                    $stmt = $pdo->prepare("UPDATE applications SET status = 'For Renewal', updated_at = NOW() WHERE scholarship_id = ? AND status = 'Active'");
+                    $stmt = $pdo->prepare("UPDATE applications SET status = 'For Renewal', updated_at = CURRENT_TIMESTAMP WHERE scholarship_id = ? AND status = 'Active'");
                     $stmt->execute([$id]);
                     $active_count = $stmt->rowCount();
 
                     // 2. Reject Pending applications (New Applicants) as the term has ended
-                    $stmt = $pdo->prepare("UPDATE applications SET status = 'Rejected', remarks = 'Scholarship term has ended. Please re-apply for the new term.', updated_at = NOW() WHERE scholarship_id = ? AND status IN ('Pending', 'Pending Exam', 'Under Review')");
+                    $stmt = $pdo->prepare("UPDATE applications SET status = 'Rejected', remarks = 'Scholarship term has ended. Please re-apply for the new term.', updated_at = CURRENT_TIMESTAMP WHERE scholarship_id = ? AND status IN ('Pending', 'Pending Exam', 'Under Review')");
                     $stmt->execute([$id]);
                     $pending_count = $stmt->rowCount();
 
@@ -635,9 +517,11 @@ switch ($action) {
                 $form = $stmt->fetch();
 
                 if (!$form) {
-                    $stmt = $pdo->prepare("INSERT INTO forms (scholarship_id, title) VALUES (?, ?)");
-                    $stmt->execute([$scholarship_id, $scholarship['name'] . ' Application Form']);
-                    $form_id = $pdo->lastInsertId();
+                    $form_id = dbExecuteInsert(
+                        $pdo,
+                        "INSERT INTO forms (scholarship_id, title) VALUES (?, ?)",
+                        [$scholarship_id, $scholarship['name'] . ' Application Form']
+                    );
                 } else {
                     $form_id = $form['id'];
                 }

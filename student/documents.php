@@ -25,28 +25,25 @@ $errors = [];
 // Handle document upload
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_FILES['document'])) {
     $file = $_FILES['document'];
-    $allowed_types = ['application/pdf'];
-    
-    // Validate file type
-    if (in_array($file['type'], $allowed_types)) {
-        $upload_dir = __DIR__ . '/../public/uploads/';
-        $file_name = uniqid() . '-' . basename($file['name']);
-        $upload_file = $upload_dir . $file_name;
+    $upload_result = storeUploadedFile(
+        $pdo,
+        $file,
+        'documents',
+        'doc_' . $user_id . '_',
+        ['application/pdf'],
+        appUploadMaxBytes(),
+        dirname(__DIR__)
+    );
 
-        // Move uploaded file
-        if (move_uploaded_file($file['tmp_name'], $upload_file)) {
-            // Save document info to database
-            try {
-                $stmt = $pdo->prepare("INSERT INTO documents (user_id, file_name, file_path) VALUES (?, ?, ?)");
-                $stmt->execute([$user_id, $file_name, 'uploads/' . $file_name]);
-            } catch (PDOException $e) {
-                $errors[] = "Error saving document: " . $e->getMessage();
-            }
-        } else {
-            $errors[] = "Error uploading file.";
+    if ($upload_result['success']) {
+        try {
+            $stmt = $pdo->prepare("INSERT INTO documents (user_id, file_name, file_path) VALUES (?, ?, ?)");
+            $stmt->execute([$user_id, $upload_result['name'], $upload_result['path']]);
+        } catch (PDOException $e) {
+            $errors[] = "Error saving document: " . $e->getMessage();
         }
     } else {
-        $errors[] = "Invalid file type. Only PDF files are allowed.";
+        $errors[] = $upload_result['error'] ?? "Invalid file type. Only PDF files are allowed.";
     }
 }
 
@@ -92,7 +89,7 @@ include 'header.php';
         <?php else: ?>
             <div class="list-group">
             <?php foreach ($documents as $document): ?>
-                <a href="../public/<?php echo htmlspecialchars($document['file_path']); ?>" target="_blank" class="list-group-item list-group-item-action">
+                <a href="<?php echo htmlspecialchars(storedFilePathToUrl($document['file_path'] ?? '')); ?>" target="_blank" class="list-group-item list-group-item-action">
                     <i class="bi bi-file-earmark-pdf-fill text-danger me-2"></i>
                     <?php echo htmlspecialchars($document['file_name']); ?>
                 </a>

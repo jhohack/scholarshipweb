@@ -59,7 +59,7 @@ try {
         if ($latest_application) {
             // Check if this latest application is an "active-like" one
             // Added 'Pending', 'Approved', 'Pending Exam' to capture New Applicants and other states
-            if (in_array($latest_application['status'], ['Active', 'Approved', 'For Renewal', 'Renewal Request', 'Drop Requested', 'Pending Exam'])) {
+            if (in_array($latest_application['status'], ['Active', 'Approved', 'For Renewal', 'Renewal Request', 'Drop Requested', 'Pending', 'Under Review', 'Pending Exam'])) {
                 $active_scholarship = $latest_application;
             } 
             // Check if this latest application is a "dropped" one
@@ -237,7 +237,7 @@ displayFlashMessages();
                             <i class="bi bi-exclamation-circle-fill me-1"></i> <strong>Action Required:</strong> Please complete the entrance exam to proceed.
                         </div>
                         <div class="d-grid mb-2">
-                            <a href="take_exam.php?id=<?php echo $active_scholarship['scholarship_id']; ?>" class="btn btn-warning fw-bold"><i class="bi bi-pencil-square me-2"></i>Take Exam Now</a>
+                            <a href="../public/entrance-exam.php?id=<?php echo $active_scholarship['application_id']; ?>" class="btn btn-warning fw-bold"><i class="bi bi-pencil-square me-2"></i>Take Exam Now</a>
                         </div>
                     <?php elseif ($active_scholarship['status'] === 'For Renewal'): ?>
                         <div class="alert alert-info small border-info">

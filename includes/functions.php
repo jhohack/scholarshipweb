@@ -1,5 +1,6 @@
 <?php
 // Utility functions for the Scholarship Portal
+require_once __DIR__ . '/storage.php';
 
 /**
  * Sanitize input data to prevent XSS and other attacks.
@@ -248,9 +249,10 @@ function processExpiredScholarships($pdo) {
         // Find active scholarships where the end_of_term date has passed.
         // Modified to only select scholarships that actually have Active students to expire.
         // This prevents the system from repeatedly processing the same scholarship if we don't set it to inactive.
+        $currentDateSql = dbCurrentDateSql($pdo);
         $stmt = $pdo->prepare("
             SELECT s.id FROM scholarships s 
-            WHERE s.end_of_term IS NOT NULL AND s.end_of_term <= CURDATE() AND s.status = 'active'
+            WHERE s.end_of_term IS NOT NULL AND s.end_of_term <= {$currentDateSql} AND s.status = 'active'
             AND EXISTS (SELECT 1 FROM applications a WHERE a.scholarship_id = s.id AND a.status = 'Active')
         ");
         $stmt->execute();

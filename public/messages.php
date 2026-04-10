@@ -17,36 +17,7 @@ if (!isStudent()) {
 
 // --- Database Migration: Create chat tables if they don't exist ---
 try {
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `conversations` (
-          `id` int(11) NOT NULL AUTO_INCREMENT,
-          `student_user_id` int(11) NOT NULL,
-          `subject` varchar(255) NOT NULL,
-          `status` enum('open','closed','pending_admin','pending_student') NOT NULL DEFAULT 'open',
-          `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-          `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-          PRIMARY KEY (`id`),
-          KEY `student_user_id` (`student_user_id`),
-          CONSTRAINT `conversations_ibfk_1` FOREIGN KEY (`student_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ");
-
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `messages` (
-          `id` int(11) NOT NULL AUTO_INCREMENT,
-          `conversation_id` int(11) NOT NULL,
-          `sender_id` int(11) NOT NULL,
-          `message_text` text DEFAULT NULL,
-          `attachment_path` varchar(255) DEFAULT NULL,
-          `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-          `is_read` tinyint(1) NOT NULL DEFAULT 0,
-          PRIMARY KEY (`id`),
-          KEY `conversation_id` (`conversation_id`),
-          KEY `sender_id` (`sender_id`),
-          CONSTRAINT `messages_ibfk_1` FOREIGN KEY (`conversation_id`) REFERENCES `conversations` (`id`) ON DELETE CASCADE,
-          CONSTRAINT `messages_ibfk_2` FOREIGN KEY (`sender_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ");
+    dbEnsureMessagingSchema($pdo);
 } catch (PDOException $e) {
     die("A critical database error occurred during schema update for chat. Please contact support.");
 }
@@ -428,9 +399,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (msg.message_text) {
                 content += `<div>${escapeHtml(msg.message_text)}</div>`;
             }
-            if (msg.attachment_path) {
-                content += `<div class="message-attachment mt-2" onclick="window.open('${escapeHtml(msg.attachment_path)}', '_blank')">
-                                <img src="${escapeHtml(msg.attachment_path)}" alt="Attachment">
+            if (msg.attachment_url) {
+                content += `<div class="message-attachment mt-2" onclick="window.open('${escapeHtml(msg.attachment_url)}', '_blank')">
+                                <img src="${escapeHtml(msg.attachment_url)}" alt="Attachment">
                             </div>`;
             }
             

@@ -52,6 +52,7 @@ $recent_applications = [];
 $application_trend_data = [];
 
 try {
+    $recentDateSql = dbDateDaysAgoSql($pdo, 6);
     // Fetch statistics based on unique students (latest application per student)
     $stats_overview = $pdo->query("
         SELECT 
@@ -101,7 +102,7 @@ try {
     $trend_stmt = $pdo->query("
         SELECT DATE(submitted_at) as application_date, COUNT(*) as count
         FROM applications
-        WHERE submitted_at >= CURDATE() - INTERVAL 6 DAY
+        WHERE submitted_at >= {$recentDateSql}
         GROUP BY DATE(submitted_at)
         ORDER BY application_date ASC
     ");

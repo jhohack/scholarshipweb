@@ -198,7 +198,7 @@ $active_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
                         $files = [];
                         if (!empty($item['attachments'])) {
                             foreach ($item['attachments'] as $att) {
-                                if (preg_match('/\.(jpg|jpeg|png|gif|webp)$/i', $att['file_path'])) {
+                                if (preg_match('/\.(jpg|jpeg|png|gif|webp)$/i', $att['file_name'] ?? '')) {
                                     $images[] = $att;
                                 } else {
                                     $files[] = $att;
@@ -228,8 +228,9 @@ $active_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
                                 <div class="row g-3 mb-4">
                                     <?php foreach ($images as $img): ?>
                                         <div class="<?php echo count($images) === 1 ? 'col-12' : (count($images) === 2 ? 'col-md-6' : 'col-md-4'); ?>">
-                                            <div class="ratio ratio-16x9 gallery-img-wrapper" onclick="showImageModal('<?php echo htmlspecialchars($img['file_path']); ?>')">
-                                                <img src="<?php echo htmlspecialchars($img['file_path']); ?>" class="object-fit-cover" alt="Announcement Image">
+                                            <?php $image_url = storedFilePathToUrl($img['file_path'] ?? ''); ?>
+                                            <div class="ratio ratio-16x9 gallery-img-wrapper" onclick="showImageModal('<?php echo htmlspecialchars($image_url); ?>')">
+                                                <img src="<?php echo htmlspecialchars($image_url); ?>" class="object-fit-cover" alt="Announcement Image">
                                             </div>
                                         </div>
                                     <?php endforeach; ?>
@@ -242,7 +243,7 @@ $active_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
                                         <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-paperclip me-2"></i>Attachments</h6>
                                         <div class="d-flex flex-wrap gap-2">
                                             <?php foreach ($files as $file): ?>
-                                                <a href="<?php echo htmlspecialchars($file['file_path']); ?>" target="_blank" class="btn btn-white bg-white border shadow-sm text-start rounded-pill px-3">
+                                                <a href="<?php echo htmlspecialchars(storedFilePathToUrl($file['file_path'] ?? '')); ?>" target="_blank" class="btn btn-white bg-white border shadow-sm text-start rounded-pill px-3">
                                                     <i class="bi bi-file-earmark-arrow-down-fill text-danger me-2"></i>
                                                     <?php echo htmlspecialchars($file['file_name']); ?>
                                                 </a>

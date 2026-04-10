@@ -36,29 +36,7 @@ if (!isAdmin()) {
 
 // --- Database Migration: Ensure Exam Tables Exist ---
 try {
-    // Create exam_submissions table if it doesn't exist
-    $pdo->exec("CREATE TABLE IF NOT EXISTS exam_submissions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        student_id INT NOT NULL,
-        scholarship_id INT NOT NULL,
-        score INT DEFAULT 0,
-        total_items INT DEFAULT 0,
-        status ENUM('in_progress', 'submitted', 'graded') DEFAULT 'in_progress',
-        start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        end_time TIMESTAMP NULL,
-        FOREIGN KEY (scholarship_id) REFERENCES scholarships(id) ON DELETE CASCADE
-    )");
-
-    // Create exam_answers table if it doesn't exist
-    $pdo->exec("CREATE TABLE IF NOT EXISTS exam_answers (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        submission_id INT NOT NULL,
-        question_id INT NOT NULL,
-        student_answer TEXT,
-        is_correct TINYINT(1) DEFAULT 0,
-        FOREIGN KEY (submission_id) REFERENCES exam_submissions(id) ON DELETE CASCADE,
-        FOREIGN KEY (question_id) REFERENCES exam_questions(id) ON DELETE CASCADE
-    )");
+    dbEnsureExamSchema($pdo);
 } catch (PDOException $e) {
     // Ignore if tables already exist or handle error
 }

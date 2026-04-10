@@ -73,26 +73,7 @@ $remaining_seconds = max(0, $exam_duration - $elapsed_time);
 
 // Ensure exam tables exist (Auto-create for this feature)
 try {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS exam_submissions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        student_id INT NOT NULL,
-        scholarship_id INT NOT NULL,
-        score INT DEFAULT 0,
-        total_items INT DEFAULT 0,
-        status ENUM('in_progress', 'submitted', 'graded') DEFAULT 'in_progress',
-        start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        end_time TIMESTAMP NULL,
-        FOREIGN KEY (scholarship_id) REFERENCES scholarships(id) ON DELETE CASCADE
-    )");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS exam_answers (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        submission_id INT NOT NULL,
-        question_id INT NOT NULL,
-        student_answer TEXT,
-        is_correct TINYINT(1) DEFAULT 0,
-        FOREIGN KEY (submission_id) REFERENCES exam_submissions(id) ON DELETE CASCADE,
-        FOREIGN KEY (question_id) REFERENCES exam_questions(id) ON DELETE CASCADE
-    )");
+    dbEnsureExamSchema($pdo);
 } catch (PDOException $e) {
     // Ignore if table exists or permission denied (assuming table exists in prod)
 }
@@ -138,9 +119,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->beginTransaction();
 
             // 1. Insert Submission
-            $stmt = $pdo->prepare("INSERT INTO exam_submissions (student_id, scholarship_id, score, total_items, status, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$application['student_id'], $application['scholarship_id'], $score, $total_items, $status, $start_time, $end_time]);
-            $submission_id = $pdo->lastInsertId();
+            $submission_id = dbExecuteInsert(
+                $pdo,
+                "INSERT INTO exam_submissions (student_id, scholarship_id, score, total_items, status, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [$application['student_id'], $application['scholarship_id'], $score, $total_items, $status, $start_time, $end_time]
+            );
 
             // 2. Insert Answers
             $ans_stmt = $pdo->prepare("INSERT INTO exam_answers (submission_id, question_id, student_answer, is_correct) VALUES (?, ?, ?, ?)");

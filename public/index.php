@@ -13,12 +13,8 @@ $current_page = basename($_SERVER['PHP_SELF']);
 // Check if a user is logged in. If so, hide the CTA.
 $is_user_logged_in = isset($_SESSION['user_id']);
 
-// --- Migration: Add amount_type to scholarships table ---
-try {
-    $pdo->query("SELECT amount_type FROM scholarships LIMIT 1");
-} catch (PDOException $e) {
-    $pdo->exec("ALTER TABLE scholarships ADD COLUMN amount_type ENUM('Peso', 'Percentage', 'None') NOT NULL DEFAULT 'Peso'");
-}
+// --- Migration: Keep scholarship columns aligned across MySQL/Postgres ---
+dbEnsureScholarshipColumns($pdo);
 
 // Fetch featured scholarships from the same pool used in scholarships.php
 try {
@@ -331,8 +327,8 @@ $page_title = 'DVC Scholarship Hub';
                                     $img_src = '';
                                     if (!empty($announcement['attachments'])) {
                                         foreach ($announcement['attachments'] as $att) {
-                                            if (preg_match('/\.(jpg|jpeg|png|gif|webp)$/i', $att['file_path'])) {
-                                                $img_src = $att['file_path'];
+                                            if (preg_match('/\.(jpg|jpeg|png|gif|webp)$/i', $att['file_name'] ?? '')) {
+                                                $img_src = storedFilePathToUrl($att['file_path'] ?? '');
                                                 break;
                                             }
                                         }

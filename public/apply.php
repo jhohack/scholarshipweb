@@ -10,36 +10,13 @@ if (session_status() === PHP_SESSION_NONE) {
 
 require_once $base_path . '/includes/functions.php';
 
-// --- Database Migration: Add application detail columns if they don't exist ---
+// --- Database Migration: Keep application/form schema aligned across drivers ---
 try {
-    // This query will fail if the columns are missing, triggering the catch block.
-    $pdo->query("SELECT year_program, units_enrolled, gwa FROM applications LIMIT 1");
+    dbEnsureApplicationsSchema($pdo);
+    dbEnsureFormsSchema($pdo);
+    dbEnsureExamSchema($pdo);
 } catch (PDOException $e) {
-    // Columns are missing. Add them.
-    try {
-        $pdo->exec("ALTER TABLE applications ADD COLUMN year_program VARCHAR(255) NULL DEFAULT NULL AFTER applicant_type");
-        $pdo->exec("ALTER TABLE applications ADD COLUMN units_enrolled INT NULL DEFAULT NULL AFTER year_program");
-        $pdo->exec("ALTER TABLE applications ADD COLUMN gwa DECIMAL(5,2) NULL DEFAULT NULL AFTER units_enrolled");
-    } catch (PDOException $ex) {
-        // If this fails, there's a more serious DB issue.
-        die("A critical database error occurred during schema update. Please contact support.");
-    }
-}
-
-// --- Database Migration: Ensure form_fields table has required columns ---
-try {
-    // Check if table exists and get columns
-    $stmt = $pdo->query("DESCRIBE form_fields");
-    $columns = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
-    if (!in_array('form_id', $columns)) $pdo->exec("ALTER TABLE form_fields ADD COLUMN form_id INT NULL");
-    if (!in_array('field_order', $columns)) $pdo->exec("ALTER TABLE form_fields ADD COLUMN field_order INT DEFAULT 0");
-    if (!in_array('field_name', $columns)) $pdo->exec("ALTER TABLE form_fields ADD COLUMN field_name VARCHAR(255) NULL");
-    if (!in_array('field_label', $columns)) $pdo->exec("ALTER TABLE form_fields ADD COLUMN field_label VARCHAR(255) NULL");
-    if (!in_array('field_type', $columns)) $pdo->exec("ALTER TABLE form_fields ADD COLUMN field_type VARCHAR(50) DEFAULT 'text'");
-    if (!in_array('is_required', $columns)) $pdo->exec("ALTER TABLE form_fields ADD COLUMN is_required TINYINT(1) DEFAULT 0");
-} catch (PDOException $e) {
-    // Table form_fields likely doesn't exist. It will be created or handled later if needed.
+    die("A critical database error occurred during schema update. Please contact support.");
 }
 
 checkSessionTimeout();
@@ -60,6 +37,45 @@ if (!$scholarship_id && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if (!$scholarship_id) {
     header("Location: scholarships.php");
     exit();
+}
+
+if (!function_exists('renderApplicationNoticePage')) {
+    function renderApplicationNoticePage($base_path, $page_title, $icon_class, $icon_color_class, $lead_text, $body_text, $button_href = 'scholarships.php', $button_label = 'Back to Scholarships')
+    {
+        ?>
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title><?php echo htmlspecialchars($page_title); ?></title>
+            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+            <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+            <link rel="stylesheet" href="assets/css/style.css">
+        </head>
+        <body>
+        <?php
+        include 'header.php';
+        echo '<main class="container py-5 mt-5">
+                <div class="row justify-content-center">
+                    <div class="col-lg-8">
+                        <div class="card shadow-sm border-0 text-center p-5" data-aos="fade-up">
+                            <div class="display-1 ' . htmlspecialchars($icon_color_class) . ' mb-3"><i class="bi ' . htmlspecialchars($icon_class) . '"></i></div>
+                            <h1 class="fw-bold">' . htmlspecialchars($page_title) . '</h1>
+                            <p class="lead text-muted">' . htmlspecialchars($lead_text) . '</p>
+                            <p>' . htmlspecialchars($body_text) . '</p>
+                            <div class="d-grid gap-2 col-6 mx-auto mt-4">
+                                <a href="' . htmlspecialchars($button_href) . '" class="btn btn-primary btn-lg">' . htmlspecialchars($button_label) . '</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>';
+        include $base_path . '/includes/footer.php';
+        echo '</body></html>';
+        exit();
+    }
 }
 
 // --- Core Rule Checks ---
@@ -203,6 +219,9 @@ $errors = [];
 $success = false;
 $form_fields = [];
 $form_info = null;
+$accepting_new_applicants = false;
+$accepting_renewal_applicants = false;
+$is_new_application_window_open = false;
 
 // --- Fetch Scholarship Details ---
 try {
@@ -237,6 +256,53 @@ try {
     $current_active_scholars = $slot_check_stmt->fetchColumn();
     $slots_full = ($current_active_scholars >= $scholarship['available_slots']);
 
+    $deadline = !empty($scholarship['deadline']) ? new DateTime($scholarship['deadline']) : null;
+    $now = new DateTime();
+    $accepting_new_applicants = !empty($scholarship['accepting_new_applicants']);
+    $accepting_renewal_applicants = !empty($scholarship['accepting_renewal_applicants']);
+    $is_new_application_window_open = $deadline ? ($now <= $deadline) : true;
+
+    if ($can_renew && !$accepting_renewal_applicants) {
+        renderApplicationNoticePage(
+            $base_path,
+            'Renewal Closed',
+            'bi-lock-fill',
+            'text-warning',
+            'This scholarship is not accepting renewal applications right now.',
+            'Please wait for the next renewal period or check your dashboard for updates.',
+            '../student/dashboard.php',
+            'Go to My Dashboard'
+        );
+    }
+
+    if (!$can_renew) {
+        if (!$accepting_new_applicants) {
+            renderApplicationNoticePage(
+                $base_path,
+                'New Applications Closed',
+                'bi-lock-fill',
+                'text-warning',
+                'This scholarship is not accepting new applicants right now.',
+                'You can return to the scholarship list and explore other available programs.',
+                'scholarships.php',
+                'Back to Scholarships'
+            );
+        }
+
+        if (!$is_new_application_window_open) {
+            renderApplicationNoticePage(
+                $base_path,
+                'Application Closed',
+                'bi-calendar-x-fill',
+                'text-danger',
+                'The deadline for new applicants has already passed.',
+                'This scholarship is no longer open for new applications.',
+                'scholarships.php',
+                'Back to Scholarships'
+            );
+        }
+    }
+
 } catch (PDOException $e) {
     $errors[] = "Could not retrieve scholarship details. Please try again.";
     $errors[] = "Database Error: " . $e->getMessage(); // For debugging purposes
@@ -270,23 +336,74 @@ if (empty($errors)) {
 // Applicant type option removed from UI: renewal/new is derived from application status.
 // Use $can_renew to render renewal form; re-check at submission time with $is_renewing.
 
+$selected_student_status = $_POST['student_status'] ?? '';
+$selected_year_level = $_POST['year_level'] ?? '';
+$selected_program = trim($_POST['program'] ?? '');
+$selected_school_id = $_POST['school_id'] ?? ($student_data['school_id_number'] ?? '');
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $posted_scholarship_id = filter_input(INPUT_POST, 'scholarship_id', FILTER_SANITIZE_NUMBER_INT);
     $user_id = $_SESSION['user_id'];
-    $documents = $_FILES['documents'] ?? null;
+    $supporting_documents = $_FILES['supporting_documents'] ?? null;
+    $gwa_document = $_FILES['gwa_document'] ?? null;
     $dynamic_responses = $_POST['fields'] ?? [];
 
     // Capture contact and birthdate for potential update
     $contact_number = trim($_POST['contact_number'] ?? '');
     $birthdate = trim($_POST['birthdate'] ?? '');
+    $selected_student_status = trim($_POST['student_status'] ?? '');
+    $selected_year_level = trim($_POST['year_level'] ?? '');
+    $selected_program = trim($_POST['program'] ?? '');
+    $selected_school_id = trim($_POST['school_id'] ?? ($student_data['school_id_number'] ?? ''));
+    $normalizeUploadedFiles = static function ($file_input) {
+        if (empty($file_input) || !isset($file_input['name'])) {
+            return [];
+        }
+
+        if (is_array($file_input['name'])) {
+            $files = [];
+            foreach ($file_input['name'] as $index => $name) {
+                $files[] = [
+                    'name' => $name,
+                    'tmp_name' => $file_input['tmp_name'][$index] ?? '',
+                    'error' => $file_input['error'][$index] ?? UPLOAD_ERR_NO_FILE,
+                    'type' => $file_input['type'][$index] ?? '',
+                    'size' => $file_input['size'][$index] ?? 0,
+                ];
+            }
+            return $files;
+        }
+
+        return [[
+            'name' => $file_input['name'],
+            'tmp_name' => $file_input['tmp_name'] ?? '',
+            'error' => $file_input['error'] ?? UPLOAD_ERR_NO_FILE,
+            'type' => $file_input['type'] ?? '',
+            'size' => $file_input['size'] ?? 0,
+        ]];
+    };
+    $hasUploadedFile = static function ($file_input) use ($normalizeUploadedFiles) {
+        foreach ($normalizeUploadedFiles($file_input) as $file) {
+            if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE && trim((string)($file['name'] ?? '')) !== '') {
+                return true;
+            }
+        }
+        return false;
+    };
+    $supporting_document_files = $normalizeUploadedFiles($supporting_documents);
+    $gwa_document_files = $normalizeUploadedFiles($gwa_document);
 
     // Update user info if provided. This happens before the main application logic.
-    if (!empty($contact_number) || !empty($birthdate)) {
+    if (!empty($contact_number) || !empty($birthdate) || (array_key_exists('school_id', $_POST) && $selected_school_id !== '')) {
         try {
             $update_fields = [];
             $update_params = [];
             if (!empty($contact_number)) { $update_fields[] = "contact_number = ?"; $update_params[] = $contact_number; }
             if (!empty($birthdate)) { $update_fields[] = "birthdate = ?"; $update_params[] = $birthdate; }
+            if (array_key_exists('school_id', $_POST) && $selected_school_id !== '') {
+                $update_fields[] = "school_id = ?";
+                $update_params[] = $selected_school_id;
+            }
             $update_params[] = $user_id;
 
             if (!empty($update_fields)) {
@@ -309,9 +426,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
     
     // Renewal specific fields
-    $year_level = $_POST['year_level'] ?? '';
-    $program = trim($_POST['program'] ?? '');
-    $year_program = ($year_level && $program) ? $year_level . ' - ' . $program : '';
+    $year_level = ($selected_year_level !== '') ? $selected_year_level : null;
+    $program = ($selected_program !== '') ? $selected_program : null;
+    $year_program = ($year_level && $program) ? $year_level . ' - ' . $program : null;
 
     $units_enrolled = filter_input(INPUT_POST, 'units_enrolled', FILTER_SANITIZE_NUMBER_INT);
     $gwa = filter_input(INPUT_POST, 'gwa', FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION);
@@ -354,7 +471,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         email = ?, 
                         phone = ?, 
                         date_of_birth = ?,
-                        updated_at = NOW()
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?"
                 );
                 $update_student_stmt->execute([
@@ -387,19 +504,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $full_name = preg_replace('/\s+/', ' ', $full_name); // Remove extra spaces
                 $school_id_for_student = !empty($user_data['school_id']) ? $user_data['school_id'] : NULL;
                 
-                $insert_stmt = $pdo->prepare(
-                    "INSERT INTO students (user_id, student_name, school_id_number, email, phone, date_of_birth) 
-                    VALUES (?, ?, ?, ?, ?, ?)"
-                );
-                $insert_stmt->execute([
+                $student_id = dbExecuteInsert(
+                    $pdo,
+                    "INSERT INTO students (user_id, student_name, school_id_number, email, phone, date_of_birth) VALUES (?, ?, ?, ?, ?, ?)",
+                    [
                     $user_id, 
                     $full_name, 
                     $school_id_for_student,
                     $user_data['email'],
                     $user_data['contact_number'],
                     $user_data['birthdate']
-                ]);
-                $student_id = $pdo->lastInsertId();
+                    ]
+                );
             } else {
                 $errors[] = "Could not retrieve user information for student record creation.";
             }
@@ -430,9 +546,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         ");
         $renew_stmt->execute([$student_id, $scholarship_id]);
         $is_renewing = ($renew_stmt->fetchColumn() > 0);
+        $is_incoming_student = !$is_renewing && $selected_student_status === 'Incoming Student';
+        $is_continuing_student = !$is_renewing && $selected_student_status === 'Continuing Student';
         // --- Validation: Renewal vs New Logic ---
         // If applying as Renewal, ensure they actually have an active scholarship for this ID.
         // If applying as New, check if slots are full
+        if ($is_renewing && !$accepting_renewal_applicants) {
+            $errors[] = "This scholarship is not accepting renewal applications right now.";
+        }
+        if (!$is_renewing && !$accepting_new_applicants) {
+            $errors[] = "This scholarship is not accepting new applicants right now.";
+        }
+        if (!$is_renewing && !$is_new_application_window_open) {
+            $errors[] = "The deadline for new applicants has already passed.";
+        }
         if (!$is_renewing && $slots_full) {
             $errors[] = "This scholarship has reached its limit for new applicants (Slots Full). Only renewal applications are currently accepted.";
         }
@@ -442,11 +569,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             if (empty($year_program) || empty($units_enrolled) || empty($gwa)) {
                 $errors[] = "Year & Program, Units Enrolled, and GWA are required for Renewal Applicants.";
             }
+            if (!$hasUploadedFile($gwa_document)) {
+                $errors[] = "A scanned copy of your GWA must be uploaded for renewal.";
+            }
         }
         // Validation for New Applicants
         else {
-            if (empty($year_program) || empty($units_enrolled) || empty($gwa)) {
-                $errors[] = "Year & Program, Units Enrolled, and GWA are required.";
+            if (!$is_incoming_student && !$is_continuing_student) {
+                $errors[] = "Please select whether you are an Incoming Student or a Continuing Student.";
+            }
+            if ($is_continuing_student) {
+                if ($selected_school_id === '') {
+                    $errors[] = "School ID is required for Continuing Students.";
+                }
+                if (empty($year_program) || empty($units_enrolled) || empty($gwa)) {
+                    $errors[] = "Year & Program, Units Enrolled, and GWA are required for Continuing Students.";
+                }
             }
             if (($dynamic_responses['is_working_student'] ?? 'No') === 'Yes' && empty(trim($dynamic_responses['working_student_job'] ?? ''))) {
                 $errors[] = "Please specify your job since you indicated you are a working student.";
@@ -454,59 +592,64 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             if (($dynamic_responses['is_pwd'] ?? 'No') === 'Yes' && empty(trim($dynamic_responses['pwd_details'] ?? ''))) {
                 $errors[] = "Please specify your disability details since you indicated you are a PWD.";
             }
-            if (empty($documents) || empty($documents['name'][0])) {
-                $errors[] = "Required documents must be uploaded.";
+            if (!$hasUploadedFile($supporting_documents)) {
+                $errors[] = "Required supporting documents must be uploaded.";
+            }
+            if ($is_continuing_student && !$hasUploadedFile($gwa_document)) {
+                $errors[] = "A scanned copy of your GWA must be uploaded for Continuing Students.";
             }
         }
 
         // --- Secure File Upload Handling ---
-        // Use a dedicated `public/uploads/` directory to avoid conflicts with other asset files
-        $upload_dir = __DIR__ . '/uploads/';
         $uploaded_files = [];
         $allowed_types = ['application/pdf'];
-
-        // Ensure the upload directory exists and is writable
-        // Handle case where a file exists at the uploads path (common accidental placeholder)
-        if (file_exists($upload_dir) && !is_dir($upload_dir)) {
-            // try to remove the conflicting file and create the directory
-            if (!@unlink($upload_dir)) {
-                $errors[] = "Upload path conflict: a file exists where upload directory should be. Please remove or rename: $upload_dir";
-            } else {
-                if (!@mkdir($upload_dir, 0777, true)) {
-                    $errors[] = "Failed to create upload directory. Please check server permissions.";
-                }
-            }
-        } elseif (!is_dir($upload_dir)) {
-            if (!@mkdir($upload_dir, 0777, true)) {
-                $errors[] = "Failed to create upload directory. Please check server permissions.";
+        $max_file_size = appUploadMaxBytes();
+        $supporting_file_count = 0;
+        foreach ($supporting_document_files as $file) {
+            if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE && trim((string)($file['name'] ?? '')) !== '') {
+                $supporting_file_count++;
             }
         }
+        if ($supporting_file_count > 5) {
+            $errors[] = "You can only upload a maximum of 5 supporting documents.";
+        }
 
-        if (!empty($documents) && is_array($documents['name'])) {
-            foreach ($documents['name'] as $key => $name) {
+        foreach ([$supporting_document_files, $gwa_document_files] as $file_group) {
+            foreach ($file_group as $file) {
+                $name = $file['name'] ?? '';
                 if (empty($name)) continue; // Skip empty file inputs
-                $tmp_name = $documents['tmp_name'][$key];
-                $error = $documents['error'][$key];
-                $type = $documents['type'][$key];
+                $tmp_name = $file['tmp_name'] ?? '';
+                $error = $file['error'] ?? UPLOAD_ERR_NO_FILE;
+                $type = $file['type'] ?? '';
+                $size = $file['size'] ?? 0;
 
                 if ($error === UPLOAD_ERR_OK) {
                     if (!in_array($type, $allowed_types)) {
                         $errors[] = "Invalid file type for '{$name}'. Only PDF files are allowed.";
                         continue;
                     }
-                    
-                    // Generate a unique, secure filename
-                    $safe_filename = preg_replace('/[^A-Za-z0-9.\-]/', '_', $name);
-                    $new_filename = uniqid($student_id . '_', true) . '_' . $safe_filename;
-                    $destination = $upload_dir . $new_filename;
+                    if ($size > $max_file_size) {
+                        $errors[] = "File '{$name}' exceeds the " . appUploadMaxLabel() . " upload limit.";
+                        continue;
+                    }
 
-                    if (move_uploaded_file($tmp_name, $destination)) {
+                    $upload_result = storeUploadedFile(
+                        $pdo,
+                        $file,
+                        'applications',
+                        $student_id . '_',
+                        $allowed_types,
+                        $max_file_size,
+                        $base_path
+                    );
+
+                    if ($upload_result['success']) {
                         $uploaded_files[] = [
-                            'name' => $new_filename,
-                            'path' => 'uploads/' . $new_filename // Store relative path for web access
+                            'name' => $upload_result['name'],
+                            'path' => $upload_result['path']
                         ];
                     } else {
-                        $errors[] = "Failed to upload file: '{$name}'. Please check server permissions.";
+                        $errors[] = $upload_result['error'] ?? "Failed to upload file: '{$name}'.";
                     }
                 } else {
                     if ($error !== UPLOAD_ERR_NO_FILE) {
@@ -524,10 +667,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 // Check if an exam exists for this scholarship (only for new applicants)
                 $has_exam = false;
                 if (!$is_renewing) {
-                    // Check if table exists first to avoid error on fresh install
                     try {
-                        $table_check = $pdo->query("SHOW TABLES LIKE 'exam_questions'");
-                        if ($table_check->rowCount() > 0) {
+                        if (dbTableExists($pdo, 'exam_questions')) {
                             $exam_check = $pdo->prepare("SELECT COUNT(*) FROM exam_questions WHERE scholarship_id = ?");
                             $exam_check->execute([$scholarship_id]);
                             $has_exam = $exam_check->fetchColumn() > 0;
@@ -542,6 +683,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 // Determine status and insert application record
                 $initial_status = ($is_renewing) ? 'Renewal Request' : ($has_exam ? 'Pending Exam' : 'Pending');
                 $applicant_type_insert = $is_renewing ? 'Renewal' : 'New';
+                $student_status_insert = $is_renewing ? 'Renewal Student' : $selected_student_status;
                 
                 $application_id = null;
                 $should_update = false;
@@ -565,14 +707,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 }
 
                 if ($should_update) {
-                    $app_stmt = $pdo->prepare("UPDATE applications SET status = ?, year_program = ?, units_enrolled = ?, gwa = ?, submitted_at = NOW(), remarks = NULL WHERE id = ?");
-                    $app_stmt->execute([$initial_status, $year_program, $units_enrolled, $gwa, $application_id]);
+                    $app_stmt = $pdo->prepare("UPDATE applications SET status = ?, student_status = ?, year_program = ?, program = ?, year_level = ?, units_enrolled = ?, gwa = ?, submitted_at = CURRENT_TIMESTAMP, remarks = NULL WHERE id = ?");
+                    $app_stmt->execute([$initial_status, $student_status_insert, $year_program, $program, $year_level, $units_enrolled, $gwa, $application_id]);
                     // Clean up old responses to prevent duplicates
                     $pdo->prepare("DELETE FROM application_responses WHERE application_id = ?")->execute([$application_id]);
                 } else {
-                    $app_stmt = $pdo->prepare("INSERT INTO applications (student_id, scholarship_id, status, applicant_type, year_program, units_enrolled, gwa, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())");
-                    $app_stmt->execute([$student_id, $scholarship_id, $initial_status, $applicant_type_insert, $year_program, $units_enrolled, $gwa]);
-                    $application_id = $pdo->lastInsertId();
+                    $application_id = dbExecuteInsert(
+                        $pdo,
+                        "INSERT INTO applications (student_id, scholarship_id, status, applicant_type, student_status, year_program, program, year_level, units_enrolled, gwa, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                        [$student_id, $scholarship_id, $initial_status, $applicant_type_insert, $student_status_insert, $year_program, $program, $year_level, $units_enrolled, $gwa]
+                    );
                 }
 
                 // If applying as a New Applicant (e.g., after being dropped), update the user's student_type
@@ -590,9 +734,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     $form_id = $form_find_stmt->fetchColumn();
     
                     if (!$form_id) {
-                        $form_create_stmt = $pdo->prepare("INSERT INTO forms (scholarship_id, title) VALUES (?, ?)");
-                        $form_create_stmt->execute([$scholarship_id, $scholarship['name'] . ' Application Form']);
-                        $form_id = $pdo->lastInsertId();
+                        $form_id = dbExecuteInsert(
+                            $pdo,
+                            "INSERT INTO forms (scholarship_id, title) VALUES (?, ?)",
+                            [$scholarship_id, $scholarship['name'] . ' Application Form']
+                        );
                     }
     
                     // 2. Fetch all existing fields for this form once to avoid repeated queries
@@ -601,15 +747,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     $existing_fields = $existing_fields_stmt->fetchAll(PDO::FETCH_KEY_PAIR);
     
                     // Check if form_fields table has scholarship_id column (to satisfy foreign key constraints)
-                    $has_scholarship_id_col = false;
-                    try {
-                        $chk_col = $pdo->query("SHOW COLUMNS FROM form_fields LIKE 'scholarship_id'");
-                        $has_scholarship_id_col = ($chk_col->rowCount() > 0);
-                    } catch (Exception $e) { /* ignore */ }
+                    $has_scholarship_id_col = dbColumnExists($pdo, 'form_fields', 'scholarship_id');
 
                     // Prepare statements for reuse
-                    $sql_insert_field = $has_scholarship_id_col ? "INSERT INTO form_fields (form_id, scholarship_id, field_label, field_name, field_type, is_required) VALUES (?, ?, ?, ?, ?, ?)" : "INSERT INTO form_fields (form_id, field_label, field_name, field_type, is_required) VALUES (?, ?, ?, ?, ?)";
-                    $field_create_stmt = $pdo->prepare($sql_insert_field);
                     $response_stmt = $pdo->prepare("INSERT INTO application_responses (application_id, form_field_id, response_value) VALUES (?, ?, ?)");
     
                     foreach ($dynamic_responses as $field_name => $response_value) {
@@ -623,11 +763,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             $field_label = ucwords(str_replace('_', ' ', $field_name));
                             $field_type = (strpos($field_name, 'essay') !== false) ? 'textarea' : 'text';
                             if ($has_scholarship_id_col) {
-                                $field_create_stmt->execute([$form_id, $scholarship_id, $field_label, $field_name, $field_type, 1]);
+                                $field_id = dbExecuteInsert(
+                                    $pdo,
+                                    "INSERT INTO form_fields (form_id, scholarship_id, field_label, field_name, field_type, is_required) VALUES (?, ?, ?, ?, ?, ?)",
+                                    [$form_id, $scholarship_id, $field_label, $field_name, $field_type, 1]
+                                );
                             } else {
-                                $field_create_stmt->execute([$form_id, $field_label, $field_name, $field_type, 1]);
+                                $field_id = dbExecuteInsert(
+                                    $pdo,
+                                    "INSERT INTO form_fields (form_id, field_label, field_name, field_type, is_required) VALUES (?, ?, ?, ?, ?)",
+                                    [$form_id, $field_label, $field_name, $field_type, 1]
+                                );
                             }
-                            $field_id = $pdo->lastInsertId();
                             $existing_fields[$field_name] = $field_id; // Add to our cache for this request
                         }
     
@@ -666,7 +813,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     $flat_data['submitted_at'] = date('Y-m-d H:i:s');
 
                     // Add standard inputs
-                    $std_fields = ['year_level', 'program', 'units_enrolled', 'gwa', 'contact_number', 'birthdate'];
+                    $std_fields = ['student_status', 'school_id', 'year_level', 'program', 'units_enrolled', 'gwa', 'contact_number', 'birthdate'];
                     foreach ($std_fields as $f) {
                         if (isset($_POST[$f])) $flat_data[$f] = $_POST[$f];
                     }
@@ -687,35 +834,27 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                     // 3. Create Table if not exists
                     // Note: We use a separate try-catch for creation to handle race conditions or existence checks
-                    $pdo->exec("CREATE TABLE IF NOT EXISTS $dynamic_table_name (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        application_id INT NOT NULL,
-                        student_id INT NOT NULL,
-                        submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )");
+                    dbEnsureDynamicSubmissionTable($pdo, $dynamic_table_name);
                     
                     // If updating, remove old entry for this application_id to avoid duplicates in dynamic table
                     if ($should_update) {
-                        $pdo->exec("DELETE FROM $dynamic_table_name WHERE application_id = $application_id");
+                        $delete_stmt = $pdo->prepare("DELETE FROM " . dbQuoteIdentifier($dynamic_table_name) . " WHERE application_id = ?");
+                        $delete_stmt->execute([$application_id]);
                     }
 
                     // 4. Ensure Columns Exist (Dynamic Schema Update)
-                    $existing_cols = [];
-                    $stmt_cols = $pdo->query("DESCRIBE $dynamic_table_name");
-                    while ($row = $stmt_cols->fetch(PDO::FETCH_ASSOC)) {
-                        $existing_cols[] = $row['Field'];
-                    }
+                    $existing_cols = dbListColumns($pdo, $dynamic_table_name);
 
                     foreach ($sanitized_data as $col => $val) {
                         if (!in_array($col, $existing_cols)) {
-                            $pdo->exec("ALTER TABLE $dynamic_table_name ADD COLUMN `$col` TEXT NULL");
+                            dbAddColumnIfMissing($pdo, $dynamic_table_name, $col, 'TEXT NULL', 'TEXT NULL');
                         }
                     }
 
                     // 5. Insert Data
-                    $cols_sql = implode(', ', array_map(function($k) { return "`$k`"; }, array_keys($sanitized_data)));
+                    $cols_sql = implode(', ', array_map('dbQuoteIdentifier', array_keys($sanitized_data)));
                     $placeholders = implode(', ', array_fill(0, count($sanitized_data), '?'));
-                    $stmt_insert = $pdo->prepare("INSERT INTO $dynamic_table_name ($cols_sql) VALUES ($placeholders)");
+                    $stmt_insert = $pdo->prepare("INSERT INTO " . dbQuoteIdentifier($dynamic_table_name) . " ($cols_sql) VALUES ($placeholders)");
                     $stmt_insert->execute(array_values($sanitized_data));
 
                 } catch (Exception $e) {
@@ -858,38 +997,38 @@ $page_title = 'Apply for Scholarship';
                                     <div class="col-md-6">
                                         <label for="year_level_renewal" class="form-label fw-bold">Year Level <span class="text-danger">*</span></label>
                                         <select class="form-select" id="year_level_renewal" name="year_level" required>
-                                            <option value="" selected disabled>Select Year</option>
-                                            <option value="1st Year">1st Year</option>
-                                            <option value="2nd Year">2nd Year</option>
-                                            <option value="3rd Year">3rd Year</option>
-                                            <option value="4th Year">4th Year</option>
+                                            <option value="" <?php echo $selected_year_level === '' ? 'selected' : ''; ?> disabled>Select Year</option>
+                                            <option value="1st Year" <?php echo $selected_year_level === '1st Year' ? 'selected' : ''; ?>>1st Year</option>
+                                            <option value="2nd Year" <?php echo $selected_year_level === '2nd Year' ? 'selected' : ''; ?>>2nd Year</option>
+                                            <option value="3rd Year" <?php echo $selected_year_level === '3rd Year' ? 'selected' : ''; ?>>3rd Year</option>
+                                            <option value="4th Year" <?php echo $selected_year_level === '4th Year' ? 'selected' : ''; ?>>4th Year</option>
                                         </select>
                                     </div>
                                     <div class="col-md-6">
                                         <label for="program_renewal" class="form-label fw-bold">Program <span class="text-danger">*</span></label>
                                         <select class="form-select" id="program_renewal" name="program" required>
-                                            <option value="" selected disabled>Select Program</option>
-                                            <option value="BSIT">BSIT</option>
-                                            <option value="AB-THEO">AB-THEO</option>
-                                            <option value="BSED- ENGLISH">BSED- ENGLISH</option>
-                                            <option value="BSED-MATH">BSED-MATH</option>
-                                            <option value="BEED">BEED</option>
+                                            <option value="" <?php echo $selected_program === '' ? 'selected' : ''; ?> disabled>Select Program</option>
+                                            <option value="BSIT" <?php echo $selected_program === 'BSIT' ? 'selected' : ''; ?>>BSIT</option>
+                                            <option value="AB-THEO" <?php echo $selected_program === 'AB-THEO' ? 'selected' : ''; ?>>AB-THEO</option>
+                                            <option value="BSED- ENGLISH" <?php echo $selected_program === 'BSED- ENGLISH' ? 'selected' : ''; ?>>BSED- ENGLISH</option>
+                                            <option value="BSED-MATH" <?php echo $selected_program === 'BSED-MATH' ? 'selected' : ''; ?>>BSED-MATH</option>
+                                            <option value="BEED" <?php echo $selected_program === 'BEED' ? 'selected' : ''; ?>>BEED</option>
                                         </select>
                                     </div>
                                 </div>
                                 <div class="row g-3 mb-3">
                                     <div class="col-md-6">
                                         <label for="units_enrolled" class="form-label fw-bold">Number of Units Enrolled <span class="text-danger">*</span></label>
-                                        <input type="number" class="form-control" id="units_enrolled" name="units_enrolled" required>
+                                        <input type="number" class="form-control" id="units_enrolled" name="units_enrolled" value="<?php echo htmlspecialchars($_POST['units_enrolled'] ?? ''); ?>" required>
                                     </div>
                                     <div class="col-md-6">
                                         <label for="gwa" class="form-label fw-bold">GWA (per semester) <span class="text-danger">*</span></label>
-                                        <input type="number" step="0.01" min="1.00" max="100.00" class="form-control" id="gwa" name="gwa" placeholder="00.00" required oninput="if(parseFloat(this.value) > 100) this.value = 100;">
+                                        <input type="number" step="0.01" min="1.00" max="100.00" class="form-control" id="gwa" name="gwa" value="<?php echo htmlspecialchars($_POST['gwa'] ?? ''); ?>" placeholder="00.00" required oninput="if(parseFloat(this.value) > 100) this.value = 100;">
                                     </div>
                                 </div>
                                 <div class="mb-4">
                                     <label for="gwa_file" class="form-label fw-bold">Upload Scanned Copy of GWA <span class="text-danger">*</span></label>
-                                    <input type="file" class="form-control" id="gwa_file" name="documents[]" accept=".pdf">
+                                    <input type="file" class="form-control" id="gwa_file" name="gwa_document" accept=".pdf" required>
                                     <div class="form-text">Accepted file format: PDF only. <span class="text-danger">The attached picture should be scanned, not a picture attached to a Word document and converted to PDF.</span></div>
                                 </div>
                             </div>
@@ -897,6 +1036,33 @@ $page_title = 'Apply for Scholarship';
 
                             <!-- New Applicant / Dynamic Form Section -->
                             <div id="new-applicant-section">
+                                <h5 class="fw-bold text-primary mb-3">New Applicant Information</h5>
+                                <div class="alert alert-info border-0 shadow-sm">
+                                    <div class="fw-bold mb-1">Choose the correct path before filling out the form.</div>
+                                    <small class="d-block">Incoming Student: not yet enrolled, so school ID and current academic details are not required.</small>
+                                    <small class="d-block">Continuing Student: already enrolled, so complete all current school and academic fields.</small>
+                                </div>
+
+                                <div class="mb-4">
+                                    <label class="form-label fw-bold">Student Status <span class="text-danger">*</span></label>
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <label class="border rounded-3 p-3 w-100 h-100 d-block">
+                                                <input class="form-check-input me-2" type="radio" name="student_status" value="Incoming Student" <?php echo $selected_student_status === 'Incoming Student' ? 'checked' : ''; ?> onchange="toggleStudentStatusSections()" required>
+                                                <span class="fw-bold d-block">Incoming Student</span>
+                                                <small class="text-muted">Apply as a new applicant without school ID, program, year level, units, or GWA.</small>
+                                            </label>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="border rounded-3 p-3 w-100 h-100 d-block">
+                                                <input class="form-check-input me-2" type="radio" name="student_status" value="Continuing Student" <?php echo $selected_student_status === 'Continuing Student' ? 'checked' : ''; ?> onchange="toggleStudentStatusSections()" required>
+                                                <span class="fw-bold d-block">Continuing Student</span>
+                                                <small class="text-muted">Apply as a new applicant and complete all current academic requirements.</small>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <h5 class="fw-bold text-primary mb-3">Personal Information</h5>
                                 <div class="row g-3 mb-3">
                                     <div class="col-md-4">
@@ -913,56 +1079,35 @@ $page_title = 'Apply for Scholarship';
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">Contact Number</label>
-                                        <input type="text" class="form-control" name="contact_number" value="<?php echo htmlspecialchars($student_data['phone'] ?? ''); ?>">
+                                        <input type="text" class="form-control" name="contact_number" value="<?php echo htmlspecialchars($_POST['contact_number'] ?? ($student_data['phone'] ?? '')); ?>">
                                     </div>
                                     <div class="col-md-4">
-                                        <label class="form-label">Year Level <span class="text-danger">*</span></label>
-                                        <select class="form-select" name="year_level" required>
-                                            <option value="" selected disabled>Select Year</option>
-                                            <option value="1st Year">1st Year</option>
-                                            <option value="2nd Year">2nd Year</option>
-                                            <option value="3rd Year">3rd Year</option>
-                                            <option value="4th Year">4th Year</option>
-                                        </select>
+                                        <label class="form-label">Birthdate</label>
+                                        <input type="date" class="form-control" name="birthdate" value="<?php echo htmlspecialchars($_POST['birthdate'] ?? ($student_data['date_of_birth'] ?? '')); ?>">
                                     </div>
                                     <div class="col-md-4">
-                                        <label class="form-label">Program <span class="text-danger">*</span></label>
-                                        <select class="form-select" name="program" required>
-                                            <option value="" selected disabled>Select Program</option>
-                                            <option value="BSIT">BSIT</option>
-                                            <option value="AB-THEO">AB-THEO</option>
-                                            <option value="BSED- ENGLISH">BSED- ENGLISH</option>
-                                            <option value="BSED-MATH">BSED-MATH</option>
-                                            <option value="BEED">BEED</option>
-                                        </select>
+                                        <label class="form-label">Age</label>
+                                        <input type="number" class="form-control" name="fields[age]" value="<?php echo htmlspecialchars($_POST['fields']['age'] ?? ($student_data['age'] ?? '')); ?>">
                                     </div>
                                 </div>
                                 <div class="row g-3 mb-3">
                                     <div class="col-md-4">
-                                        <label class="form-label">Birthdate</label>
-                                        <input type="date" class="form-control" name="birthdate" value="<?php echo htmlspecialchars($student_data['date_of_birth'] ?? ''); ?>">
-                                    </div>
-                                    <div class="col-md-4">
                                         <label class="form-label">Birthplace <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" name="fields[birthplace]" required>
+                                        <input type="text" class="form-control" name="fields[birthplace]" value="<?php echo htmlspecialchars($_POST['fields']['birthplace'] ?? ''); ?>" required>
                                     </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label">Age</label>
-                                        <input type="number" class="form-control" name="fields[age]" value="<?php echo htmlspecialchars($student_data['age'] ?? ''); ?>">
+                                    <div class="col-md-8">
+                                        <label class="form-label">Permanent Address <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" name="fields[permanent_address]" value="<?php echo htmlspecialchars($_POST['fields']['permanent_address'] ?? ''); ?>" required>
                                     </div>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label">Permanent Address <span class="text-danger">*</span></label>
-                                    <input type="text" class="form-control" name="fields[permanent_address]" required>
                                 </div>
                                 <div class="row g-3 mb-3">
                                     <div class="col-md-8">
                                         <label class="form-label">Current Address <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" name="fields[current_address]" required>
+                                        <input type="text" class="form-control" name="fields[current_address]" value="<?php echo htmlspecialchars($_POST['fields']['current_address'] ?? ''); ?>" required>
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">Tribe (if applicable)</label>
-                                        <input type="text" class="form-control" name="fields[tribe]">
+                                        <input type="text" class="form-control" name="fields[tribe]" value="<?php echo htmlspecialchars($_POST['fields']['tribe'] ?? ''); ?>">
                                     </div>
                                 </div>
 
@@ -970,122 +1115,150 @@ $page_title = 'Apply for Scholarship';
                                 <div class="row g-3 mb-3">
                                     <div class="col-md-4">
                                         <label class="form-label">Mother's Name <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" name="fields[mother_name]" required>
+                                        <input type="text" class="form-control" name="fields[mother_name]" value="<?php echo htmlspecialchars($_POST['fields']['mother_name'] ?? ''); ?>" required>
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">Occupation</label>
-                                        <input type="text" class="form-control" name="fields[mother_occupation]">
+                                        <input type="text" class="form-control" name="fields[mother_occupation]" value="<?php echo htmlspecialchars($_POST['fields']['mother_occupation'] ?? ''); ?>">
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">Contact Number</label>
-                                        <input type="text" class="form-control" name="fields[mother_contact]">
+                                        <input type="text" class="form-control" name="fields[mother_contact]" value="<?php echo htmlspecialchars($_POST['fields']['mother_contact'] ?? ''); ?>">
                                     </div>
                                 </div>
                                 <div class="row g-3 mb-3">
                                     <div class="col-md-4">
                                         <label class="form-label">Father's Name <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" name="fields[father_name]" required>
+                                        <input type="text" class="form-control" name="fields[father_name]" value="<?php echo htmlspecialchars($_POST['fields']['father_name'] ?? ''); ?>" required>
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">Occupation</label>
-                                        <input type="text" class="form-control" name="fields[father_occupation]">
+                                        <input type="text" class="form-control" name="fields[father_occupation]" value="<?php echo htmlspecialchars($_POST['fields']['father_occupation'] ?? ''); ?>">
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">Contact Number</label>
-                                        <input type="text" class="form-control" name="fields[father_contact]">
+                                        <input type="text" class="form-control" name="fields[father_contact]" value="<?php echo htmlspecialchars($_POST['fields']['father_contact'] ?? ''); ?>">
                                     </div>
                                 </div>
                                 <div class="row g-3 mb-3">
                                     <div class="col-md-4">
                                         <label class="form-label">Parents' Monthly Income <span class="text-danger">*</span></label>
-                                        <input type="number" class="form-control" name="fields[parents_income]" required>
+                                        <input type="number" class="form-control" name="fields[parents_income]" value="<?php echo htmlspecialchars($_POST['fields']['parents_income'] ?? ''); ?>" required>
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">Working Student? <span class="text-danger">*</span></label>
                                         <select class="form-select" name="fields[is_working_student]" id="is_working_student" required onchange="toggleConditionalInputs()">
-                                            <option value="No">No</option>
-                                            <option value="Yes">Yes</option>
+                                            <option value="No" <?php echo ($_POST['fields']['is_working_student'] ?? 'No') === 'No' ? 'selected' : ''; ?>>No</option>
+                                            <option value="Yes" <?php echo ($_POST['fields']['is_working_student'] ?? '') === 'Yes' ? 'selected' : ''; ?>>Yes</option>
                                         </select>
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label" id="label_working_student_job">If Yes, specify job</label>
-                                        <input type="text" class="form-control" name="fields[working_student_job]" id="working_student_job">
+                                        <input type="text" class="form-control" name="fields[working_student_job]" id="working_student_job" value="<?php echo htmlspecialchars($_POST['fields']['working_student_job'] ?? ''); ?>">
                                     </div>
                                 </div>
                                 <div class="row g-3 mb-3">
                                     <div class="col-md-4">
                                         <label class="form-label">PWD? <span class="text-danger">*</span></label>
                                         <select class="form-select" name="fields[is_pwd]" id="is_pwd" required onchange="toggleConditionalInputs()">
-                                            <option value="No">No</option>
-                                            <option value="Yes">Yes</option>
+                                            <option value="No" <?php echo ($_POST['fields']['is_pwd'] ?? 'No') === 'No' ? 'selected' : ''; ?>>No</option>
+                                            <option value="Yes" <?php echo ($_POST['fields']['is_pwd'] ?? '') === 'Yes' ? 'selected' : ''; ?>>Yes</option>
                                         </select>
                                     </div>
                                     <div class="col-md-8">
                                         <label class="form-label" id="label_pwd_details">If Yes, specify disability</label>
-                                        <input type="text" class="form-control" name="fields[pwd_details]" id="pwd_details">
+                                        <input type="text" class="form-control" name="fields[pwd_details]" id="pwd_details" value="<?php echo htmlspecialchars($_POST['fields']['pwd_details'] ?? ''); ?>">
                                     </div>
                                 </div>
 
-                                <h5 class="fw-bold text-primary mb-3 mt-4">Educational Attainment</h5>
+                                <h5 class="fw-bold text-primary mb-3 mt-4">Previous School Information</h5>
                                 <div class="row g-3 mb-3">
                                     <div class="col-md-8">
                                         <label class="form-label">Junior High School <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" name="fields[jhs_school]" required>
+                                        <input type="text" class="form-control" name="fields[jhs_school]" value="<?php echo htmlspecialchars($_POST['fields']['jhs_school'] ?? ''); ?>" required>
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">Year Graduated <span class="text-danger">*</span></label>
                                         <div class="input-group">
-                                            <input type="number" class="form-control" name="jhs_year_start" placeholder="Start" required>
+                                            <input type="number" class="form-control" name="jhs_year_start" placeholder="Start" value="<?php echo htmlspecialchars($_POST['jhs_year_start'] ?? ''); ?>" required>
                                             <span class="input-group-text">-</span>
-                                            <input type="number" class="form-control" name="jhs_year_end" placeholder="End" required>
+                                            <input type="number" class="form-control" name="jhs_year_end" placeholder="End" value="<?php echo htmlspecialchars($_POST['jhs_year_end'] ?? ''); ?>" required>
                                         </div>
                                     </div>
                                 </div>
                                 <div class="row g-3 mb-3">
                                     <div class="col-md-8">
                                         <label class="form-label">Senior High School <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" name="fields[shs_school]" required>
+                                        <input type="text" class="form-control" name="fields[shs_school]" value="<?php echo htmlspecialchars($_POST['fields']['shs_school'] ?? ''); ?>" required>
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">Year Graduated <span class="text-danger">*</span></label>
                                         <div class="input-group">
-                                            <input type="number" class="form-control" name="shs_year_start" placeholder="Start" required>
+                                            <input type="number" class="form-control" name="shs_year_start" placeholder="Start" value="<?php echo htmlspecialchars($_POST['shs_year_start'] ?? ''); ?>" required>
                                             <span class="input-group-text">-</span>
-                                            <input type="number" class="form-control" name="shs_year_end" placeholder="End" required>
+                                            <input type="number" class="form-control" name="shs_year_end" placeholder="End" value="<?php echo htmlspecialchars($_POST['shs_year_end'] ?? ''); ?>" required>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="row g-3 mb-3">
-                                    <div class="col-md-8">
-                                        <label class="form-label">Current School <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" name="fields[current_school]" required>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label">Current Year Level <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" name="fields[current_year_level]" required>
-                                    </div>
-                                </div>
 
-                                <h5 class="fw-bold text-primary mb-3 mt-4">Required Information</h5>
-                                <div class="row g-3 mb-3">
-                                    <div class="col-md-4">
-                                        <label class="form-label">School ID Number</label>
-                                        <input type="text" class="form-control bg-light" value="<?php echo htmlspecialchars($student_data['school_id_number'] ?? ''); ?>" readonly>
+                                <div id="continuing-student-fields" data-student-visibility="Continuing Student">
+                                    <h5 class="fw-bold text-primary mb-3 mt-4">Current Enrollment Details</h5>
+                                    <div class="alert alert-warning border-0">
+                                        <small>Continuing students must complete their current school, school ID, program, year level, units, and GWA.</small>
                                     </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label">Units Enrolled <span class="text-danger">*</span></label>
-                                        <input type="number" class="form-control" name="units_enrolled" required>
+                                    <div class="row g-3 mb-3">
+                                        <div class="col-md-4">
+                                            <label class="form-label">School ID Number <span class="text-danger">*</span></label>
+                                            <input type="text" class="form-control" name="school_id" value="<?php echo htmlspecialchars($selected_school_id); ?>" data-required-for="Continuing Student">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label">Year Level <span class="text-danger">*</span></label>
+                                            <select class="form-select" name="year_level" data-required-for="Continuing Student">
+                                                <option value="">Select Year</option>
+                                                <option value="1st Year" <?php echo $selected_year_level === '1st Year' ? 'selected' : ''; ?>>1st Year</option>
+                                                <option value="2nd Year" <?php echo $selected_year_level === '2nd Year' ? 'selected' : ''; ?>>2nd Year</option>
+                                                <option value="3rd Year" <?php echo $selected_year_level === '3rd Year' ? 'selected' : ''; ?>>3rd Year</option>
+                                                <option value="4th Year" <?php echo $selected_year_level === '4th Year' ? 'selected' : ''; ?>>4th Year</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label">Program <span class="text-danger">*</span></label>
+                                            <select class="form-select" name="program" data-required-for="Continuing Student">
+                                                <option value="">Select Program</option>
+                                                <option value="BSIT" <?php echo $selected_program === 'BSIT' ? 'selected' : ''; ?>>BSIT</option>
+                                                <option value="AB-THEO" <?php echo $selected_program === 'AB-THEO' ? 'selected' : ''; ?>>AB-THEO</option>
+                                                <option value="BSED- ENGLISH" <?php echo $selected_program === 'BSED- ENGLISH' ? 'selected' : ''; ?>>BSED- ENGLISH</option>
+                                                <option value="BSED-MATH" <?php echo $selected_program === 'BSED-MATH' ? 'selected' : ''; ?>>BSED-MATH</option>
+                                                <option value="BEED" <?php echo $selected_program === 'BEED' ? 'selected' : ''; ?>>BEED</option>
+                                            </select>
+                                        </div>
                                     </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label">GWA (per semester) <span class="text-danger">*</span></label>
-                                        <input type="number" step="0.01" min="1.00" max="100.00" class="form-control" name="gwa" placeholder="00.00" required oninput="if(parseFloat(this.value) > 100) this.value = 100;">
+                                    <div class="row g-3 mb-3">
+                                        <div class="col-md-8">
+                                            <label class="form-label">Current School <span class="text-danger">*</span></label>
+                                            <input type="text" class="form-control" name="fields[current_school]" value="<?php echo htmlspecialchars($_POST['fields']['current_school'] ?? ''); ?>" data-required-for="Continuing Student">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label">Current Year Level <span class="text-danger">*</span></label>
+                                            <input type="text" class="form-control" name="fields[current_year_level]" value="<?php echo htmlspecialchars($_POST['fields']['current_year_level'] ?? ''); ?>" data-required-for="Continuing Student">
+                                        </div>
                                     </div>
-                                </div>
-                                <div class="mb-4">
-                                    <label class="form-label fw-bold">Upload Scanned Copy of GWA (PDF) <span class="text-danger">*</span></label>
-                                    <div class="input-group">
-                                        <input type="file" class="form-control" id="gwa_document" name="documents[]" accept=".pdf" required>
-                                        <button class="btn btn-outline-danger" type="button" id="remove_gwa_btn" style="display: none;" title="Remove file"><i class="bi bi-x-lg"></i></button>
+                                    <div class="row g-3 mb-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label">Units Enrolled <span class="text-danger">*</span></label>
+                                            <input type="number" class="form-control" name="units_enrolled" value="<?php echo htmlspecialchars($_POST['units_enrolled'] ?? ''); ?>" data-required-for="Continuing Student">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">GWA (per semester) <span class="text-danger">*</span></label>
+                                            <input type="number" step="0.01" min="1.00" max="100.00" class="form-control" name="gwa" value="<?php echo htmlspecialchars($_POST['gwa'] ?? ''); ?>" placeholder="00.00" oninput="if(parseFloat(this.value) > 100) this.value = 100;" data-required-for="Continuing Student">
+                                        </div>
+                                    </div>
+                                    <div class="mb-4">
+                                        <label class="form-label fw-bold">Upload Scanned Copy of GWA (PDF) <span class="text-danger">*</span></label>
+                                        <div class="input-group">
+                                            <input type="file" class="form-control" id="gwa_document" name="gwa_document" accept=".pdf" data-required-for="Continuing Student">
+                                            <button class="btn btn-outline-danger" type="button" id="remove_gwa_btn" style="display: none;" title="Remove file"><i class="bi bi-x-lg"></i></button>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -1104,11 +1277,11 @@ $page_title = 'Apply for Scholarship';
                                 <div class="mb-4">
                                     <label for="documents_new" class="form-label fw-bold">Upload Documents</label>
                                     <div class="file-upload-wrapper">
-                                        <input type="file" id="documents_new" name="documents[]" multiple class="file-upload-input" accept=".pdf">
+                                        <input type="file" id="documents_new" name="supporting_documents[]" multiple class="file-upload-input" accept=".pdf" required>
                                         <div class="file-upload-content">
                                             <i class="bi bi-cloud-arrow-up-fill"></i>
                                             <p><strong>Drag & drop files here</strong> or click to browse.</p>
-                                            <small class="text-muted">PDF files only. Max 5MB per file. Max 5 files.</small>
+                                            <small class="text-muted">PDF files only. Max <?php echo htmlspecialchars(appUploadMaxLabel()); ?> per file. Max 5 files.</small>
                                         </div>
                                     </div>
                                     <div id="file-list-new" class="mt-3"></div>
@@ -1131,7 +1304,7 @@ $page_title = 'Apply for Scholarship';
                                     'is_pwd', 'pwd_details',
                                     'jhs_school', 'shs_school', 'current_school', 'current_year_level',
                                     'jhs_year', 'shs_year', 'contact_number', 'birthdate', 'program', 'year_level',
-                                    'units_enrolled', 'gwa'
+                                    'units_enrolled', 'gwa', 'student_status', 'school_id'
                                 ];
                                 $display_fields = array_filter($form_fields, function($f) use ($excluded_fields) {
                                     return !in_array($f['field_name'], $excluded_fields);
@@ -1231,6 +1404,22 @@ $page_title = 'Apply for Scholarship';
     </div>
 
     <script>
+    function toggleStudentStatusSections() {
+        const selectedStatusInput = document.querySelector('input[name="student_status"]:checked');
+        const selectedStatus = selectedStatusInput ? selectedStatusInput.value : '';
+
+        document.querySelectorAll('[data-student-visibility]').forEach(section => {
+            const shouldShow = selectedStatus !== '' && section.getAttribute('data-student-visibility') === selectedStatus;
+            section.style.display = shouldShow ? '' : 'none';
+
+            section.querySelectorAll('[data-required-for]').forEach(field => {
+                const isRequired = shouldShow && field.getAttribute('data-required-for') === selectedStatus;
+                field.disabled = !shouldShow;
+                field.required = isRequired;
+            });
+        });
+    }
+
     function toggleConditionalInputs() {
         // Working Student Logic
         const workingSelect = document.getElementById('is_working_student');
@@ -1261,6 +1450,7 @@ $page_title = 'Apply for Scholarship';
 
     // Initialize on load
     document.addEventListener('DOMContentLoaded', function() {
+        toggleStudentStatusSections();
         // Initialize conditional inputs if they exist (New Applicant flow)
         toggleConditionalInputs();
 

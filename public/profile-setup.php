@@ -32,30 +32,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $picture_path = null;
     if (empty($errors)) {
         if ($profile_picture && $profile_picture['error'] === UPLOAD_ERR_OK) {
-            $upload_dir = $base_path . '/public/uploads/avatars/';
-            if (!is_dir($upload_dir)) {
-                if (!mkdir($upload_dir, 0777, true)) {
-                    $errors[] = "Failed to create upload directory. Please check server permissions.";
-                }
-            }
-            
-            if (empty($errors)) {
-                $allowed_types = ['image/jpeg', 'image/png', 'image/gif'];
-                if (in_array($profile_picture['type'], $allowed_types)) {
-                    // Generate a unique name but keep it somewhat identifiable
-                    $safe_filename = preg_replace('/[^A-Za-z0-9.\-]/', '_', basename($profile_picture['name']));
-                    // We don't have user_id yet, so we use a temp unique id
-                    $new_filename = 'new_user_' . uniqid() . '_' . $safe_filename;
-                    $destination = $upload_dir . $new_filename;
+            $upload_result = storeUploadedFile(
+                $pdo,
+                $profile_picture,
+                'avatars',
+                'new_user_',
+                ['image/jpeg', 'image/png', 'image/gif'],
+                appUploadMaxBytes(),
+                $base_path
+            );
 
-                    if (move_uploaded_file($profile_picture['tmp_name'], $destination)) {
-                        $picture_path = 'uploads/avatars/' . $new_filename;
-                    } else {
-                        $errors[] = "Failed to upload profile picture.";
-                    }
-                } else {
-                    $errors[] = "Invalid file type for profile picture. Please use JPG, PNG, or GIF.";
-                }
+            if ($upload_result['success']) {
+                $picture_path = $upload_result['path'];
+            } else {
+                $errors[] = $upload_result['error'] ?? "Failed to upload profile picture.";
             }
         }
     }
@@ -90,25 +80,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 }
             }
 
-            $insert_stmt = $pdo->prepare(
-                "INSERT INTO users (first_name, middle_name, last_name, email, school_id, password, contact_number, birthdate, email_verified, role, status, student_type, profile_picture_path) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'student', 'active', ?, ?)"
+            $user_id = dbExecuteInsert(
+                $pdo,
+                "INSERT INTO users (first_name, middle_name, last_name, email, school_id, password, contact_number, birthdate, email_verified, role, status, student_type, profile_picture_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'student', 'active', ?, ?)",
+                [
+                    $reg_data['first_name'],
+                    $reg_data['middle_name'] ?? '',
+                    $reg_data['last_name'],
+                    $reg_data['email'],
+                    $school_id,
+                    $reg_data['password'], // Storing plain text password as requested
+                    null, // Contact number removed from this step
+                    $reg_data['birthdate'],
+                    $student_type,
+                    $picture_path
+                ]
             );
-            
-            $insert_stmt->execute([
-                $reg_data['first_name'],
-                $reg_data['middle_name'] ?? '',
-                $reg_data['last_name'],
-                $reg_data['email'],
-                $school_id,
-                $reg_data['password'], // Storing plain text password as requested
-                null, // Contact number removed from this step
-                $reg_data['birthdate'],
-                $student_type,
-                $picture_path
-            ]);
-
-            $user_id = $pdo->lastInsertId();
 
             // --- Step 3.5: Create the corresponding record in the `students` table ---
             $insert_student_stmt = $pdo->prepare(

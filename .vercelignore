@@ -1,0 +1,21 @@
+.git
+.gitignore
+.qodo
+.sixth
+.vercel
+logs
+lovable
+lovable-scholarship-portal
+VERIFICATION_REPORT.md
+IMPLEMENTATION_SUMMARY.md
+FIX_COMPLETION_REPORT.md
+FIXES_DOCUMENTATION.md
+DOCUMENTATION_INDEX.md
+ARCHITECTURE_OVERVIEW.md
+QUICK_START.md
+README.md
+scholarship_db (2).sql
+sql
+tools
+vendor
+public/uploads

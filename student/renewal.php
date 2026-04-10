@@ -61,55 +61,76 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && empty($errors)) {
     if (empty($document) || $document['error'] === UPLOAD_ERR_NO_FILE) {
         $errors[] = "An updated GWA document is required for renewal.";
     } else {
-        // --- Secure File Upload Handling ---
-        $upload_dir = $base_path . '/public/uploads/';
-        $uploaded_file = null;
-        $allowed_types = ['application/pdf']; // Already PDF only, but confirming.
+        $uploaded_file = storeUploadedFile(
+            $pdo,
+            $document,
+            'renewals',
+            'GWA_' . $student_id . '_',
+            ['application/pdf'],
+            appUploadMaxBytes(),
+            $base_path
+        );
 
-        if (!is_dir($upload_dir)) {
-            mkdir($upload_dir, 0777, true);
-        }
-
-        if ($document['error'] === UPLOAD_ERR_OK) {
-            if (!in_array($document['type'], $allowed_types)) {
-                $errors[] = "Invalid file type. Only PDF files are allowed.";
-            } else {
-                $safe_filename = preg_replace('/[^A-Za-z0-9.\-]/', '_', $document['name']);
-                $new_filename = uniqid('GWA_' . $student_id . '_', true) . '_' . $safe_filename;
-                $destination = $upload_dir . $new_filename;
-
-                if (move_uploaded_file($document['tmp_name'], $destination)) {
-                    $uploaded_file = [
-                        'name' => $new_filename,
-                        'path' => 'uploads/' . $new_filename
-                    ];
-                } else {
-                    $errors[] = "Failed to upload file. Please check server permissions.";
-                }
-            }
-        } else {
-            $errors[] = "Error uploading file.";
+        if (!$uploaded_file['success']) {
+            $errors[] = $uploaded_file['error'] ?? "Error uploading file.";
         }
 
         // --- Database Insertion ---
-        if (empty($errors) && $uploaded_file) {
+        if (empty($errors) && !empty($uploaded_file['path'])) {
             try {
                 $pdo->beginTransaction();
 
                 // 1. Insert a new application with 'Renewal Request' status
                 // We copy over the submission date from the original to maintain context, but set a new status.
-                $stmt = $pdo->prepare("
-                    INSERT INTO applications (student_id, scholarship_id, status, submitted_at, essay, gpa)
-                    SELECT student_id, scholarship_id, 'Renewal Request', NOW(), essay, gpa
+                $new_application_id = dbExecuteInsert(
+                    $pdo,
+                    "INSERT INTO applications (
+                        student_id,
+                        scholarship_id,
+                        scholarship_name,
+                        application_requirements,
+                        status,
+                        application_type,
+                        applicant_type,
+                        submitted_at,
+                        updated_at,
+                        year_program,
+                        program,
+                        year_level,
+                        units_enrolled,
+                        gwa,
+                        student_status,
+                        scholarship_percentage,
+                        scholarship_amount,
+                        remarks
+                    )
+                    SELECT
+                        student_id,
+                        scholarship_id,
+                        scholarship_name,
+                        application_requirements,
+                        'Renewal Request',
+                        'renewal',
+                        'Renewal',
+                        CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP,
+                        year_program,
+                        program,
+                        year_level,
+                        units_enrolled,
+                        gwa,
+                        'Renewal Student',
+                        scholarship_percentage,
+                        scholarship_amount,
+                        NULL
                     FROM applications
-                    WHERE id = ?
-                ");
-                $stmt->execute([$application_id]);
-                $new_application_id = $pdo->lastInsertId();
+                    WHERE id = ?",
+                    [$application_id]
+                );
 
                 // 2. Insert the uploaded document, linking it to the new application
                 $doc_stmt = $pdo->prepare("INSERT INTO documents (user_id, application_id, file_name, file_path) VALUES (?, ?, ?, ?)");
-                $doc_stmt->execute([$student_id, $new_application_id, $uploaded_file['name'], $uploaded_file['path']]);
+                $doc_stmt->execute([$user_id, $new_application_id, $uploaded_file['name'], $uploaded_file['path']]);
 
                 $pdo->commit();
                 $success = true;

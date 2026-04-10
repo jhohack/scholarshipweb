@@ -19,7 +19,8 @@ $logout_link = (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') ? '..
 // Check for new announcements (posted within the last 24 hours)
 $has_new_announcements = false;
 try {
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM announcements WHERE is_active = 1 AND created_at >= NOW() - INTERVAL 1 DAY");
+    $recentAnnouncementSql = dbTimestampDaysAgoSql($pdo, 1);
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM announcements WHERE is_active = 1 AND created_at >= {$recentAnnouncementSql}");
     $stmt->execute();
     if ($stmt->fetchColumn() > 0) {
         $has_new_announcements = true;
@@ -158,12 +159,9 @@ if (isset($_SESSION['user_id'])) {
                     <div class="dropdown user-dropdown">
                         <a href="#" class="d-flex align-items-center text-decoration-none dropdown-toggle" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                             <?php
-                                $profile_pic_path = '../public/assets/img/default-avatar.png'; // A default fallback
-                                if (isset($_SESSION['profile_picture_path']) && !empty($_SESSION['profile_picture_path']) && file_exists($base_path . '/public/' . $_SESSION['profile_picture_path'])) {
-                                    $profile_pic_path = '../public/' . $_SESSION['profile_picture_path'];
-                                } else {
-                                    $profile_pic_path = 'https://i.pravatar.cc/40?u=' . htmlspecialchars($_SESSION['user_id']);
-                                }
+                                $profile_pic_path = !empty($_SESSION['profile_picture_path'])
+                                    ? storedFilePathToUrl($_SESSION['profile_picture_path'])
+                                    : 'https://i.pravatar.cc/40?u=' . rawurlencode((string) $_SESSION['user_id']);
                             ?>
                             <img src="<?php echo htmlspecialchars($profile_pic_path); ?>" alt="User" width="40" height="40" class="rounded-circle me-2" style="object-fit: cover;">
                             <div class="d-none d-md-block">

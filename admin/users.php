@@ -58,6 +58,7 @@ if ($action === 'get_user' && isset($_GET['id'])) {
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($user) {
+            $user['profile_picture_url'] = storedFilePathToUrl($user['profile_picture_path'] ?? '');
             $response = ['user' => $user, 'application' => null, 'responses' => []];
 
             // If user is a student, fetch latest application info
@@ -261,20 +262,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         } else {
                             // Storing plain text password as requested.
                             $sql = "INSERT INTO users (first_name, middle_name, last_name, email, school_id, role, permissions, password, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)";
-                            $pdo->prepare($sql)->execute([
-                                $first_name,
-                                $middle_name,
-                                $last_name, $email,
-                                !empty($school_id) ? $school_id : null,
-                                $role,
-                                $permissions,
-                                $password
-                            ]);
+                            $user_id = dbExecuteInsert(
+                                $pdo,
+                                $sql,
+                                [
+                                    $first_name,
+                                    $middle_name,
+                                    $last_name,
+                                    $email,
+                                    !empty($school_id) ? $school_id : null,
+                                    $role,
+                                    $permissions,
+                                    $password
+                                ]
+                            );
                             $success = "User created successfully.";
 
                             // If the new user is a student, create a corresponding entry in the students table
                             if ($role === 'student') {
-                                $user_id = $pdo->lastInsertId();
                                 $student_insert_stmt = $pdo->prepare(
                                     "INSERT INTO students (user_id, student_name, school_id_number, email, phone, date_of_birth) VALUES (?, ?, ?, ?, ?, ?)"
                                 );
@@ -418,7 +423,7 @@ if (isset($_GET['ajax'])) {
                 <td>
                     <div class="d-flex align-items-center">
                         <?php if (!empty($user['profile_picture_path'])): ?>
-                            <img src="../<?php echo htmlspecialchars($user['profile_picture_path']); ?>" alt="Profile" class="rounded-circle me-2" width="32" height="32" style="object-fit: cover;">
+                            <img src="<?php echo htmlspecialchars(storedFilePathToUrl($user['profile_picture_path'])); ?>" alt="Profile" class="rounded-circle me-2" width="32" height="32" style="object-fit: cover;">
                         <?php else: ?>
                             <div class="rounded-circle bg-secondary bg-opacity-10 d-flex align-items-center justify-content-center me-2 text-secondary" style="width: 32px; height: 32px;"><i class="bi bi-person-fill"></i></div>
                         <?php endif; ?>
@@ -466,7 +471,7 @@ if (isset($_GET['ajax'])) {
                 <td>
                     <div class="d-flex align-items-center">
                         <?php if (!empty($user['profile_picture_path'])): ?>
-                            <img src="../<?php echo htmlspecialchars($user['profile_picture_path']); ?>" alt="Profile" class="rounded-circle me-2 grayscale" width="32" height="32" style="object-fit: cover; filter: grayscale(100%);">
+                            <img src="<?php echo htmlspecialchars(storedFilePathToUrl($user['profile_picture_path'])); ?>" alt="Profile" class="rounded-circle me-2 grayscale" width="32" height="32" style="object-fit: cover; filter: grayscale(100%);">
                         <?php else: ?>
                             <div class="rounded-circle bg-secondary bg-opacity-10 d-flex align-items-center justify-content-center me-2 text-secondary" style="width: 32px; height: 32px;"><i class="bi bi-person-fill"></i></div>
                         <?php endif; ?>
@@ -619,7 +624,7 @@ include 'header.php'; // This includes the sidebar and main layout
                             <td>
                                 <div class="d-flex align-items-center">
                                     <?php if (!empty($user['profile_picture_path'])): ?>
-                                        <img src="../<?php echo htmlspecialchars($user['profile_picture_path']); ?>" alt="Profile" class="rounded-circle me-2" width="32" height="32" style="object-fit: cover;">
+                                        <img src="<?php echo htmlspecialchars(storedFilePathToUrl($user['profile_picture_path'])); ?>" alt="Profile" class="rounded-circle me-2" width="32" height="32" style="object-fit: cover;">
                                     <?php else: ?>
                                         <div class="rounded-circle bg-secondary bg-opacity-10 d-flex align-items-center justify-content-center me-2 text-secondary" style="width: 32px; height: 32px;"><i class="bi bi-person-fill"></i></div>
                                     <?php endif; ?>
@@ -693,7 +698,7 @@ include 'header.php'; // This includes the sidebar and main layout
                             <td>
                                 <div class="d-flex align-items-center">
                                     <?php if (!empty($user['profile_picture_path'])): ?>
-                                        <img src="../<?php echo htmlspecialchars($user['profile_picture_path']); ?>" alt="Profile" class="rounded-circle me-2 grayscale" width="32" height="32" style="object-fit: cover; filter: grayscale(100%);">
+                                        <img src="<?php echo htmlspecialchars(storedFilePathToUrl($user['profile_picture_path'])); ?>" alt="Profile" class="rounded-circle me-2 grayscale" width="32" height="32" style="object-fit: cover; filter: grayscale(100%);">
                                     <?php else: ?>
                                         <div class="rounded-circle bg-secondary bg-opacity-10 d-flex align-items-center justify-content-center me-2 text-secondary" style="width: 32px; height: 32px;"><i class="bi bi-person-fill"></i></div>
                                     <?php endif; ?>
@@ -990,8 +995,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
                     // Populate profile picture
                     const picContainer = document.getElementById('view_profile_picture_container');
-                    if (user.profile_picture_path) {
-                        picContainer.innerHTML = `<img src="../${user.profile_picture_path}?t=${new Date().getTime()}" alt="Profile" class="rounded-circle d-block" style="width: 100%; height: 100%; object-fit: cover;">`;
+                    if (user.profile_picture_url) {
+                        picContainer.innerHTML = `<img src="${user.profile_picture_url}?t=${new Date().getTime()}" alt="Profile" class="rounded-circle d-block" style="width: 100%; height: 100%; object-fit: cover;">`;
                     } else {
                         picContainer.innerHTML = `<i class="bi bi-person-fill"></i>`;
                     }

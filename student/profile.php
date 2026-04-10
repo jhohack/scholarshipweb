@@ -43,6 +43,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $last_name = trim($_POST['last_name'] ?? '');
     $contact_number = trim($_POST['contact_number'] ?? '');
     $birthdate = trim($_POST['birthdate'] ?? '');
+    $school_id = trim($_POST['school_id'] ?? '');
     $profile_picture = $_FILES['profile_picture'] ?? null;
     $current_picture_path = $student['profile_picture_path'] ?? null;
 
@@ -52,32 +53,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         // --- Handle Profile Picture Upload ---
         $new_picture_path = $current_picture_path;
         if ($profile_picture && $profile_picture['error'] === UPLOAD_ERR_OK) {
-            $upload_dir = $base_path . '/public/uploads/avatars/';
-            if (!is_dir($upload_dir)) {
-                if (!mkdir($upload_dir, 0777, true)) {
-                    $errors[] = "Failed to create upload directory. Please check server permissions.";
-                }
-            }
-            
-            if (empty($errors)) {
-                $allowed_types = ['image/jpeg', 'image/png', 'image/gif'];
-                if (in_array($profile_picture['type'], $allowed_types)) {
-                    $safe_filename = preg_replace('/[^A-Za-z0-9.\-]/', '_', basename($profile_picture['name']));
-                    $new_filename = 'user_' . $user_id . '_' . time() . '_' . $safe_filename;
-                    $destination = $upload_dir . $new_filename;
+            $upload_result = storeUploadedFile(
+                $pdo,
+                $profile_picture,
+                'avatars',
+                'user_' . $user_id . '_',
+                ['image/jpeg', 'image/png', 'image/gif'],
+                appUploadMaxBytes(),
+                $base_path
+            );
 
-                    if (move_uploaded_file($profile_picture['tmp_name'], $destination)) {
-                        // Delete old picture if it exists
-                        if ($current_picture_path && file_exists($base_path . '/public/' . $current_picture_path)) {
-                            @unlink($base_path . '/public/' . $current_picture_path);
-                        }
-                        $new_picture_path = 'uploads/avatars/' . $new_filename;
-                    } else {
-                        $errors[] = "Failed to upload profile picture.";
-                    }
-                } else {
-                    $errors[] = "Invalid file type for profile picture. Please use JPG, PNG, or GIF.";
-                }
+            if ($upload_result['success']) {
+                deleteStoredFileByPath($pdo, $current_picture_path, $base_path);
+                $new_picture_path = $upload_result['path'];
+            } else {
+                $errors[] = $upload_result['error'] ?? "Failed to upload profile picture.";
             }
         }
         if (empty($errors)) { try {
@@ -92,29 +82,47 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                 if ($user_data) {
                     $school_id_for_student = !empty($user_data['school_id']) ? $user_data['school_id'] : null;
-                    $insert_student_stmt = $pdo->prepare("INSERT INTO students (user_id, student_name, school_id_number, email, phone, date_of_birth) VALUES (?, ?, ?, ?, ?, ?)");
-                    $insert_student_stmt->execute([
-                        $user_id,
-                        trim("$first_name $middle_name $last_name"),
-                        $school_id_for_student,
-                        $user_data['email'],
-                        $contact_number,
-                        $birthdate
-                    ]);
+                    $student['student_id'] = dbExecuteInsert(
+                        $pdo,
+                        "INSERT INTO students (user_id, student_name, school_id_number, email, phone, date_of_birth) VALUES (?, ?, ?, ?, ?, ?)",
+                        [
+                            $user_id,
+                            trim("$first_name $middle_name $last_name"),
+                            $school_id_for_student,
+                            $user_data['email'],
+                            $contact_number,
+                            $birthdate
+                        ]
+                    );
                 }
             }
 
             // Update the users table
             $update_user_stmt = $pdo->prepare(
-                "UPDATE users SET first_name = ?, middle_name = ?, last_name = ?, contact_number = ?, birthdate = ?, profile_picture_path = ? WHERE id = ?"
+                "UPDATE users SET first_name = ?, middle_name = ?, last_name = ?, contact_number = ?, birthdate = ?, school_id = ?, profile_picture_path = ? WHERE id = ?"
             );
-            $update_user_stmt->execute([$first_name, $middle_name, $last_name, $contact_number, $birthdate, $new_picture_path, $user_id]);
+            $update_user_stmt->execute([
+                $first_name,
+                $middle_name,
+                $last_name,
+                $contact_number,
+                $birthdate,
+                $school_id !== '' ? $school_id : null,
+                $new_picture_path,
+                $user_id
+            ]);
 
             // Also update the students table to keep it in sync
             $update_student_stmt = $pdo->prepare(
-                "UPDATE students SET student_name = ?, phone = ?, date_of_birth = ? WHERE id = ?"
+                "UPDATE students SET student_name = ?, school_id_number = ?, phone = ?, date_of_birth = ? WHERE id = ?"
             );
-            $update_student_stmt->execute([trim("$first_name $middle_name $last_name"), $contact_number, $birthdate, $student['student_id']]);
+            $update_student_stmt->execute([
+                trim("$first_name $middle_name $last_name"),
+                $school_id !== '' ? $school_id : null,
+                $contact_number,
+                $birthdate,
+                $student['student_id']
+            ]);
 
             $pdo->commit();
             $success = "Profile updated successfully.";
@@ -158,12 +166,9 @@ include 'header.php';
         <div class="row g-4">
             <div class="col-12 text-center mb-3">
                 <?php
-                    $avatar_path = '../public/assets/img/default-avatar.png'; // Default fallback
-                    if (!empty($student['profile_picture_path']) && file_exists($base_path . '/public/' . $student['profile_picture_path'])) {
-                        $avatar_path = '../public/' . $student['profile_picture_path'];
-                    } else {
-                        $avatar_path = 'https://i.pravatar.cc/150?u=' . htmlspecialchars($user_id);
-                    }
+                    $avatar_path = !empty($student['profile_picture_path'])
+                        ? storedFilePathToUrl($student['profile_picture_path'])
+                        : 'https://i.pravatar.cc/150?u=' . rawurlencode((string) $user_id);
                 ?>
                 <img src="<?php echo $avatar_path; ?>" alt="Profile Picture" class="rounded-circle mb-3" width="150" height="150" style="object-fit: cover; border: 4px solid #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
                 <div class="col-md-6 mx-auto">
@@ -198,7 +203,8 @@ include 'header.php';
             </div>
             <div class="col-md-6">
                 <label for="school_id" class="form-label">School ID</label>
-                <input type="text" class="form-control" id="school_id" name="school_id" value="<?php echo htmlspecialchars($student['school_id'] ?? ''); ?>" disabled readonly>
+                <input type="text" class="form-control" id="school_id" name="school_id" value="<?php echo htmlspecialchars($student['school_id'] ?? ''); ?>" placeholder="Enter your school ID once available">
+                <div class="form-text">Incoming students can leave this blank for now and update it later after enrollment.</div>
             </div>
         </div>
         <div class="mt-4">

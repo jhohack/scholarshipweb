@@ -24,9 +24,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($subject && $message) {
         try {
             $pdo->beginTransaction();
-            $stmt = $pdo->prepare("INSERT INTO support_tickets (student_id, application_id, subject) VALUES (?, ?, ?)");
-            $stmt->execute([$student_id, $app_id, $subject]);
-            $ticket_id = $pdo->lastInsertId();
+            $ticket_id = dbExecuteInsert(
+                $pdo,
+                "INSERT INTO support_tickets (student_id, application_id, subject) VALUES (?, ?, ?)",
+                [$student_id, $app_id, $subject]
+            );
 
             $msgStmt = $pdo->prepare("INSERT INTO support_messages (ticket_id, sender_id, message) VALUES (?, ?, ?)");
             $msgStmt->execute([$ticket_id, $user_id, $message]);

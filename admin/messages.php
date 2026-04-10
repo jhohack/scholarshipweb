@@ -34,36 +34,7 @@ if (!isAdmin()) {
 
 // --- Database Migration: Create chat tables if they don't exist ---
 try {
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `conversations` (
-          `id` int(11) NOT NULL AUTO_INCREMENT,
-          `student_user_id` int(11) NOT NULL,
-          `subject` varchar(255) NOT NULL,
-          `status` enum('open','closed','pending_admin','pending_student') NOT NULL DEFAULT 'open',
-          `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-          `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-          PRIMARY KEY (`id`),
-          KEY `student_user_id` (`student_user_id`),
-          CONSTRAINT `conversations_ibfk_1` FOREIGN KEY (`student_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ");
-
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `messages` (
-          `id` int(11) NOT NULL AUTO_INCREMENT,
-          `conversation_id` int(11) NOT NULL,
-          `sender_id` int(11) NOT NULL,
-          `message_text` text DEFAULT NULL,
-          `attachment_path` varchar(255) DEFAULT NULL,
-          `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-          `is_read` tinyint(1) NOT NULL DEFAULT 0,
-          PRIMARY KEY (`id`),
-          KEY `conversation_id` (`conversation_id`),
-          KEY `sender_id` (`sender_id`),
-          CONSTRAINT `messages_ibfk_1` FOREIGN KEY (`conversation_id`) REFERENCES `conversations` (`id`) ON DELETE CASCADE,
-          CONSTRAINT `messages_ibfk_2` FOREIGN KEY (`sender_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ");
+    dbEnsureMessagingSchema($pdo);
 } catch (PDOException $e) {
     die("A critical database error occurred during schema update for chat. Please contact support.");
 }
@@ -630,12 +601,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const convoEl = document.createElement('div');
             convoEl.className = `conversation-item ${convo.id == currentConversationId ? 'active' : ''}`;
             convoEl.dataset.id = convo.id;
-            convoEl.dataset.avatar = convo.profile_picture_path || '';
+            convoEl.dataset.avatar = convo.profile_picture_url || '';
             convoEl.dataset.name = `${convo.first_name} ${convo.last_name}`;
             convoEl.dataset.studentId = convo.student_user_id;
 
             const studentName = `${escapeHtml(convo.first_name)} ${escapeHtml(convo.last_name)}`;
-            const avatarSrc = convo.profile_picture_path ? `../${escapeHtml(convo.profile_picture_path)}` : null;
+            const avatarSrc = convo.profile_picture_url ? escapeHtml(convo.profile_picture_url) : null;
             const avatarHtml = avatarSrc 
                 ? `<img src="${avatarSrc}" class="avatar" alt="User">`
                 : `<div class="avatar-placeholder">${studentName.charAt(0)}</div>`;
@@ -671,7 +642,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const studentId = activeItem.dataset.studentId;
         
         document.getElementById('headerName').textContent = name;
-        document.getElementById('headerAvatar').src = avatarPath ? `../${avatarPath}` : '../public/assets/images/default-avatar.png';
+        document.getElementById('headerAvatar').src = avatarPath || '../public/assets/images/default-avatar.png';
         document.getElementById('viewProfileLink').href = `users.php?search=${encodeURIComponent(name)}`; // Simple link to users
         
         document.getElementById('chatHeader').style.display = 'flex';
@@ -734,9 +705,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (msg.message_text) {
                 content += `<div>${escapeHtml(msg.message_text)}</div>`;
             }
-            if (msg.attachment_path) {
-                // Note: Path is relative to the public folder
-                const attachmentUrl = `../public/${escapeHtml(msg.attachment_path)}`;
+            if (msg.attachment_url) {
+                const attachmentUrl = escapeHtml(msg.attachment_url);
                 content += `<div class="message-attachment mt-2" onclick="window.open('${attachmentUrl}', '_blank')">
                                 <img src="${attachmentUrl}" alt="Attachment">
                             </div>`;

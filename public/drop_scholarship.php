@@ -41,7 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($application) {
                     // 3. Update status to 'Dropped'
                     // This status allows the student to apply for new scholarships immediately
-                    $update_stmt = $pdo->prepare("UPDATE applications SET status = 'Dropped', updated_at = NOW() WHERE id = ?");
+                    $update_stmt = $pdo->prepare("UPDATE applications SET status = 'Dropped', updated_at = CURRENT_TIMESTAMP WHERE id = ?");
                     $update_stmt->execute([$application_id]);
 
                     // Update user to New Applicant so they can apply again as new

@@ -1,6 +1,9 @@
 <?php
-require_once __DIR__ . '/../../includes/config.php';
-require_once __DIR__ . '/../../includes/auth.php';
+$base_path = dirname(__DIR__, 2);
+require_once $base_path . '/includes/config.php';
+require_once $base_path . '/includes/db.php';
+require_once $base_path . '/includes/functions.php';
+require_once $base_path . '/includes/auth.php';
 
 // Check if the user is an admin
 if (!isAdmin()) {
@@ -11,7 +14,15 @@ if (!isAdmin()) {
 // Fetch applications from the database
 $applications = [];
 try {
-    $stmt = $pdo->query("SELECT a.id, a.student_id, a.scholarship_id, a.status, s.name AS scholarship_name, u.name AS student_name FROM applications a JOIN scholarships s ON a.scholarship_id = s.id JOIN users u ON a.student_id = u.id");
+    $stmt = $pdo->query("
+        SELECT a.id, a.student_id, a.scholarship_id, a.status, a.submitted_at,
+               s.name AS scholarship_name,
+               st.student_name
+        FROM applications a
+        JOIN scholarships s ON a.scholarship_id = s.id
+        JOIN students st ON a.student_id = st.id
+        ORDER BY a.submitted_at DESC, a.id DESC
+    ");
     $applications = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     // Handle database error
@@ -19,7 +30,7 @@ try {
 }
 
 // Include header
-include_once __DIR__ . '/../../includes/header.php';
+include_once $base_path . '/includes/header.php';
 ?>
 
 <div class="admin-container">
@@ -55,4 +66,4 @@ include_once __DIR__ . '/../../includes/header.php';
     </table>
 </div>
 
-<?php include_once __DIR__ . '/../../includes/footer.php'; ?>
+<?php include_once $base_path . '/includes/footer.php'; ?>

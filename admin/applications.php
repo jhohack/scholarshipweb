@@ -28,47 +28,39 @@ function convertGwaToPercentage($gwa) {
     return round(110 - (10 * $gwa));
 }
 
-// Ensure notifications table exists
-try {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS notifications (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        student_id INT NOT NULL,
-        title VARCHAR(255) DEFAULT 'System Notification',
-        message TEXT,
-        is_read TINYINT(1) DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
-    )");
+function isIncomingApplicant(array $application): bool {
+    return ($application['applicant_type'] ?? '') === 'New'
+        && ($application['student_status'] ?? '') === 'Incoming Student';
+}
 
-    // Migration: Ensure title column exists
-    try {
-        $pdo->query("SELECT title FROM notifications LIMIT 1");
-    } catch (PDOException $e) {
-        $pdo->exec("ALTER TABLE notifications ADD COLUMN title VARCHAR(255) DEFAULT 'System Notification'");
+function getApplicantStatusLabel(array $application): string {
+    if (($application['applicant_type'] ?? '') === 'Renewal') {
+        return 'Renewal Student';
     }
-} catch (PDOException $e) { /* Ignore if exists */ }
 
-// Migration: Add scholarship_percentage to applications table
-try {
-    $pdo->query("SELECT scholarship_percentage FROM applications LIMIT 1");
-} catch (PDOException $e) {
-    $pdo->exec("ALTER TABLE applications ADD COLUMN scholarship_percentage DECIMAL(5,2) NULL DEFAULT NULL");
+    return $application['student_status'] ?? 'Continuing Student';
 }
 
-// Migration: Add scholarship_amount to applications table
-try {
-    $pdo->query("SELECT scholarship_amount FROM applications LIMIT 1");
-} catch (PDOException $e) {
-    $pdo->exec("ALTER TABLE applications ADD COLUMN scholarship_amount DECIMAL(10,2) NULL DEFAULT NULL");
+function formatAcademicDisplay(array $application, string $field): string {
+    if (isIncomingApplicant($application)) {
+        return match ($field) {
+            'program' => 'Incoming',
+            'year_level' => 'Not Enrolled',
+            'units_enrolled', 'gwa' => 'Pending',
+            default => '-',
+        };
+    }
+
+    if ($field === 'gwa') {
+        return convertGwaToPercentage($application[$field] ?? '');
+    }
+
+    $value = $application[$field] ?? null;
+    return ($value === null || $value === '') ? '-' : (string)$value;
 }
 
-// Migration: Split year_program into separate program and year_level columns
-try {
-    $pdo->query("SELECT program FROM applications LIMIT 1");
-} catch (PDOException $e) {
-    $pdo->exec("ALTER TABLE applications ADD COLUMN program VARCHAR(100) NULL DEFAULT NULL");
-    $pdo->exec("ALTER TABLE applications ADD COLUMN year_level VARCHAR(50) NULL DEFAULT NULL");
-}
+dbEnsureNotificationsTable($pdo);
+dbEnsureApplicationsSchema($pdo);
 
 // Sync Data: Automatically parse year_program into new columns if they are empty
 // This ensures existing data is split correctly based on specific programs and year levels
@@ -88,6 +80,8 @@ for ($i = 1; $i <= 4; $i++) {
 }
 
 checkSessionTimeout();
+
+$autoRejectNote = "\nSystem: Auto-rejected due to approval in another scholarship.";
 
 if (!isAdmin()) {
     if (isset($_SESSION['role']) && $_SESSION['role'] === 'staff') {
@@ -144,6 +138,10 @@ if ($action === 'get_details' && isset($_GET['app_id'])) {
         $stmt = $pdo->prepare("SELECT file_name, file_path FROM documents WHERE application_id = ?");
         $stmt->execute([$app_id]);
         $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($documents as &$document) {
+            $document['file_url'] = storedFilePathToUrl($document['file_path'] ?? '');
+        }
+        unset($document);
 
         // 4. Exam Results
         $stmt = $pdo->prepare("
@@ -182,18 +180,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_details'])) {
         $s_email = $_POST['email'] ?? '';
         $s_phone = $_POST['phone'] ?? '';
         $s_dob = $_POST['date_of_birth'] ?? '';
+        $s_id_num = trim($s_id_num);
+        $student_user_id = null;
+
+        $stmt_user = $pdo->prepare("SELECT user_id FROM students WHERE id = ?");
+        $stmt_user->execute([$student_id]);
+        $student_user_id = $stmt_user->fetchColumn();
         
         $stmt = $pdo->prepare("UPDATE students SET student_name = ?, school_id_number = ?, email = ?, phone = ?, date_of_birth = ? WHERE id = ?");
-        $stmt->execute([$s_name, $s_id_num, $s_email, $s_phone, $s_dob, $student_id]);
+        $stmt->execute([$s_name, ($s_id_num !== '' ? $s_id_num : null), $s_email, $s_phone, $s_dob, $student_id]);
+
+        if ($student_user_id) {
+            $stmt_user_sync = $pdo->prepare("UPDATE users SET school_id = ? WHERE id = ?");
+            $stmt_user_sync->execute([($s_id_num !== '' ? $s_id_num : null), $student_user_id]);
+        }
 
         // 2. Update Application Info
         $prog = $_POST['program'] ?? '';
         $yl = $_POST['year_level'] ?? '';
-        $units = $_POST['units_enrolled'] ?? 0;
-        $gwa = $_POST['gwa'] ?? 0;
+        $student_status = trim($_POST['student_status'] ?? '');
+        $units = ($_POST['units_enrolled'] ?? '') !== '' ? $_POST['units_enrolled'] : null;
+        $gwa = ($_POST['gwa'] ?? '') !== '' ? $_POST['gwa'] : null;
         
-        $stmt = $pdo->prepare("UPDATE applications SET program = ?, year_level = ?, units_enrolled = ?, gwa = ? WHERE id = ?");
-        $stmt->execute([$prog, $yl, $units, $gwa, $app_id]);
+        $stmt = $pdo->prepare("UPDATE applications SET program = ?, year_level = ?, units_enrolled = ?, gwa = ?, student_status = ? WHERE id = ?");
+        $stmt->execute([
+            trim($prog) !== '' ? trim($prog) : null,
+            trim($yl) !== '' ? trim($yl) : null,
+            $units,
+            $gwa,
+            $student_status !== '' ? $student_status : null,
+            $app_id
+        ]);
 
         // --- Auto-Recalculate Amount/Percentage if Logic Applies ---
         // Fetch necessary info to check logic
@@ -277,7 +294,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
             }
 
             // Update Status
-            $stmt = $pdo->prepare("UPDATE applications SET status = ?, remarks = ?, scholarship_percentage = ?, scholarship_amount = ?, updated_at = NOW() WHERE id = ?");
+            $stmt = $pdo->prepare("UPDATE applications SET status = ?, remarks = ?, scholarship_percentage = ?, scholarship_amount = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
             $stmt->execute([$new_status, $remarks, $scholarship_percentage, $scholarship_amount, $app_id]);
 
             // Auto-reject other pending applications if Approved
@@ -290,11 +307,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
                     $stmt_reject = $pdo->prepare("
                         UPDATE applications 
                         SET status = 'Rejected', 
-                            remarks = CONCAT(COALESCE(remarks, ''), '\nSystem: Auto-rejected due to approval in another scholarship.'),
-                            updated_at = NOW()
+                            remarks = CONCAT(COALESCE(remarks, ''), ?),
+                            updated_at = CURRENT_TIMESTAMP
                         WHERE student_id = ? AND id != ? AND status IN ('Pending', 'Pending Exam', 'Under Review')
                     ");
-                    $stmt_reject->execute([$student_id, $app_id]);
+                    $stmt_reject->execute([$autoRejectNote, $student_id, $app_id]);
                 }
             }
 
@@ -375,7 +392,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['export_csv'])) {
     // Fetch ALL data for the scholarship (ignoring selection)
     $stmt = $pdo->prepare("
         SELECT s.student_name, s.school_id_number, s.email, s.phone,
-               sch.name as scholarship_name, a.applicant_type, a.program, a.year_level,
+               sch.name as scholarship_name, a.applicant_type, a.student_status, a.program, a.year_level,
                a.status, a.scholarship_percentage, a.scholarship_amount, a.submitted_at
         FROM applications a
         JOIN students s ON a.student_id = s.id
@@ -391,7 +408,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['export_csv'])) {
     header('Content-Disposition: attachment; filename="applicants_export_all_' . date('Y-m-d_H-i') . '.csv"');
     
     $output = fopen('php://output', 'w');
-    fputcsv($output, ['Student Name', 'School ID', 'Email', 'Phone', 'Scholarship', 'Type', 'Program', 'Year Level', 'Status', 'Percentage', 'Amount', 'Date Applied']);
+    fputcsv($output, ['Student Name', 'School ID', 'Email', 'Phone', 'Scholarship', 'Type', 'Student Status', 'Program', 'Year Level', 'Status', 'Percentage', 'Amount', 'Date Applied']);
     foreach ($rows as $row) {
         fputcsv($output, [
             $row['student_name'],
@@ -400,8 +417,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['export_csv'])) {
             $row['phone'],
             $row['scholarship_name'],
             $row['applicant_type'],
-            $row['program'],
-            $row['year_level'],
+            $row['student_status'],
+            formatAcademicDisplay($row, 'program'),
+            formatAcademicDisplay($row, 'year_level'),
             $row['status'],
             $row['scholarship_percentage'] ? $row['scholarship_percentage'] . '%' : '',
             $row['scholarship_amount'],
@@ -419,7 +437,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['export_doc'])) {
     // Fetch ALL data for the scholarship (ignoring selection)
     $stmt = $pdo->prepare("
         SELECT s.student_name, s.school_id_number, s.email, s.phone,
-               sch.name as scholarship_name, a.applicant_type, a.program, a.year_level,
+               sch.name as scholarship_name, a.applicant_type, a.student_status, a.program, a.year_level,
                a.status, a.scholarship_percentage, a.scholarship_amount, a.submitted_at
         FROM applications a
         JOIN students s ON a.student_id = s.id
@@ -438,7 +456,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['export_doc'])) {
     echo "<body>";
     echo "<h2>Full Applicant List Export</h2>";
     echo "<table>";
-    echo "<thead><tr><th>Student Name</th><th>School ID</th><th>Email</th><th>Phone</th><th>Scholarship</th><th>Type</th><th>Program</th><th>Year Level</th><th>Status</th><th>Percentage</th><th>Amount</th><th>Date Applied</th></tr></thead>";
+    echo "<thead><tr><th>Student Name</th><th>School ID</th><th>Email</th><th>Phone</th><th>Scholarship</th><th>Type</th><th>Student Status</th><th>Program</th><th>Year Level</th><th>Status</th><th>Percentage</th><th>Amount</th><th>Date Applied</th></tr></thead>";
     echo "<tbody>";
     foreach ($rows as $row) {
         echo "<tr>";
@@ -448,8 +466,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['export_doc'])) {
         echo "<td>" . htmlspecialchars($row['phone']) . "</td>";
         echo "<td>" . htmlspecialchars($row['scholarship_name']) . "</td>";
         echo "<td>" . htmlspecialchars($row['applicant_type']) . "</td>";
-        echo "<td>" . htmlspecialchars($row['program']) . "</td>";
-        echo "<td>" . htmlspecialchars($row['year_level']) . "</td>";
+        echo "<td>" . htmlspecialchars($row['student_status'] ?? '') . "</td>";
+        echo "<td>" . htmlspecialchars(formatAcademicDisplay($row, 'program')) . "</td>";
+        echo "<td>" . htmlspecialchars(formatAcademicDisplay($row, 'year_level')) . "</td>";
         echo "<td>" . htmlspecialchars($row['status']) . "</td>";
         echo "<td>" . ($row['scholarship_percentage'] ? htmlspecialchars($row['scholarship_percentage']) . '%' : '') . "</td>";
         echo "<td>" . htmlspecialchars($row['scholarship_amount']) . "</td>";
@@ -469,7 +488,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_action'])) {
 
     if (!empty($selected_ids) && in_array($bulk_status, ['Approved', 'Rejected'])) {
         $count = 0;
-        $stmt = $pdo->prepare("UPDATE applications SET status = ?, updated_at = NOW() WHERE id = ?");
+        $stmt = $pdo->prepare("UPDATE applications SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
         
         foreach ($selected_ids as $app_id) {
             $stmt->execute([$bulk_status, $app_id]);
@@ -480,8 +499,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_action'])) {
                 $stmt_student->execute([$app_id]);
                 $student_id = $stmt_student->fetchColumn();
                 if ($student_id) {
-                    $stmt_reject = $pdo->prepare("UPDATE applications SET status = 'Rejected', remarks = CONCAT(COALESCE(remarks, ''), '\nSystem: Auto-rejected due to approval in another scholarship.'), updated_at = NOW() WHERE student_id = ? AND id != ? AND status IN ('Pending', 'Pending Exam', 'Under Review')");
-                    $stmt_reject->execute([$student_id, $app_id]);
+                    $stmt_reject = $pdo->prepare("UPDATE applications SET status = 'Rejected', remarks = CONCAT(COALESCE(remarks, ''), ?), updated_at = CURRENT_TIMESTAMP WHERE student_id = ? AND id != ? AND status IN ('Pending', 'Pending Exam', 'Under Review')");
+                    $stmt_reject->execute([$autoRejectNote, $student_id, $app_id]);
                 }
             }
 
@@ -663,7 +682,7 @@ if ($scholarship_id) {
                         <td>
                             <div class="d-flex align-items-center">
                                 <?php if (!empty($app['profile_picture_path'])): ?>
-                                    <img src="../<?php echo htmlspecialchars($app['profile_picture_path']); ?>" alt="Profile" class="rounded-circle me-2" width="32" height="32" style="object-fit: cover;">
+                                    <img src="<?php echo htmlspecialchars(storedFilePathToUrl($app['profile_picture_path'])); ?>" alt="Profile" class="rounded-circle me-2" width="32" height="32" style="object-fit: cover;">
                                 <?php else: ?>
                                     <div class="rounded-circle bg-secondary bg-opacity-10 d-flex align-items-center justify-content-center me-2 text-secondary" style="width: 32px; height: 32px;"><i class="bi bi-person-fill"></i></div>
                                 <?php endif; ?>
@@ -687,11 +706,12 @@ if ($scholarship_id) {
                             <?php else: ?>
                                 <span class="badge bg-primary">Renewal</span>
                             <?php endif; ?>
+                            <div class="small text-muted mt-1"><?php echo htmlspecialchars(getApplicantStatusLabel($app)); ?></div>
                         </td>
-                        <td><span class="badge bg-light text-dark border"><?php echo htmlspecialchars($app['program'] ?? '-'); ?></span></td>
-                        <td><small class="text-muted fw-bold"><?php echo htmlspecialchars($app['year_level'] ?? '-'); ?></small></td>
-                        <td><span class="fw-bold"><?php echo htmlspecialchars($app['units_enrolled'] ?? '-'); ?></span></td>
-                        <td><span class="fw-bold"><?php echo htmlspecialchars(convertGwaToPercentage($app['gwa'] ?? '')); ?></span></td>
+                        <td><span class="badge bg-light text-dark border"><?php echo htmlspecialchars(formatAcademicDisplay($app, 'program')); ?></span></td>
+                        <td><small class="text-muted fw-bold"><?php echo htmlspecialchars(formatAcademicDisplay($app, 'year_level')); ?></small></td>
+                        <td><span class="fw-bold"><?php echo htmlspecialchars(formatAcademicDisplay($app, 'units_enrolled')); ?></span></td>
+                        <td><span class="fw-bold"><?php echo htmlspecialchars(formatAcademicDisplay($app, 'gwa')); ?></span></td>
                         <td>
                             <div><?php echo date("M d, Y", strtotime($app['submitted_at'])); ?></div>
                             <small class="text-muted"><?php echo date("h:i A", strtotime($app['submitted_at'])); ?></small>
@@ -1231,7 +1251,7 @@ displayFlashMessages();
                                         <td>
                                             <div class="d-flex align-items-center">
                                                 <?php if (!empty($app['profile_picture_path'])): ?>
-                                                    <img src="../<?php echo htmlspecialchars($app['profile_picture_path']); ?>" alt="Profile" class="rounded-circle me-2" width="32" height="32" style="object-fit: cover;">
+                                                    <img src="<?php echo htmlspecialchars(storedFilePathToUrl($app['profile_picture_path'])); ?>" alt="Profile" class="rounded-circle me-2" width="32" height="32" style="object-fit: cover;">
                                                 <?php else: ?>
                                                     <div class="rounded-circle bg-secondary bg-opacity-10 d-flex align-items-center justify-content-center me-2 text-secondary" style="width: 32px; height: 32px;"><i class="bi bi-person-fill"></i></div>
                                                 <?php endif; ?>
@@ -1255,11 +1275,12 @@ displayFlashMessages();
                                             <?php else: ?>
                                                 <span class="badge bg-primary">Renewal</span>
                                             <?php endif; ?>
+                                            <div class="small text-muted mt-1"><?php echo htmlspecialchars(getApplicantStatusLabel($app)); ?></div>
                                         </td>
-                        <td><span class="badge bg-light text-dark border"><?php echo htmlspecialchars($app['program'] ?? '-'); ?></span></td>
-                        <td><small class="text-muted fw-bold"><?php echo htmlspecialchars($app['year_level'] ?? '-'); ?></small></td>
-                        <td><span class="fw-bold"><?php echo htmlspecialchars($app['units_enrolled'] ?? '-'); ?></span></td>
-                        <td><span class="fw-bold"><?php echo htmlspecialchars(convertGwaToPercentage($app['gwa'] ?? '')); ?></span></td>
+                        <td><span class="badge bg-light text-dark border"><?php echo htmlspecialchars(formatAcademicDisplay($app, 'program')); ?></span></td>
+                        <td><small class="text-muted fw-bold"><?php echo htmlspecialchars(formatAcademicDisplay($app, 'year_level')); ?></small></td>
+                        <td><span class="fw-bold"><?php echo htmlspecialchars(formatAcademicDisplay($app, 'units_enrolled')); ?></span></td>
+                        <td><span class="fw-bold"><?php echo htmlspecialchars(formatAcademicDisplay($app, 'gwa')); ?></span></td>
                         <td class="text-nowrap">
                             <div class="small"><?php echo date("M d, Y", strtotime($app['submitted_at'])); ?></div>
                             <small class="text-muted" style="font-size: 0.75rem;"><?php echo date("h:i A", strtotime($app['submitted_at'])); ?></small>
@@ -1704,11 +1725,19 @@ function viewApplicant(appId) {
             document.getElementById('personal-content').innerHTML = `
                 <table class="table table-borderless">
                     <tr><th width="30%">Name:</th><td><input type="text" class="form-control form-control-sm" name="student_name" value="${app.student_name}"></td></tr>
-                    <tr><th>School ID:</th><td><input type="text" class="form-control form-control-sm" name="school_id_number" value="${app.school_id_number}"></td></tr>
+                    <tr><th>School ID:</th><td><input type="text" class="form-control form-control-sm" name="school_id_number" value="${app.school_id_number || ''}" placeholder="${app.student_status === 'Incoming Student' ? 'No school ID yet' : ''}"></td></tr>
                     <tr><th>Email:</th><td><input type="email" class="form-control form-control-sm" name="email" value="${app.email}"></td></tr>
                     <tr><th>Phone:</th><td><input type="text" class="form-control form-control-sm" name="phone" value="${app.phone || ''}"></td></tr>
                     <tr><th>Birthdate:</th><td><input type="date" class="form-control form-control-sm" name="date_of_birth" value="${app.date_of_birth || ''}"></td></tr>
                     <tr><th>Type:</th><td><input type="text" class="form-control form-control-sm" value="${app.applicant_type}" readonly disabled></td></tr>
+                    <tr><th>Student Status:</th><td>
+                        <select class="form-select form-select-sm" name="student_status">
+                            <option value="">Select status</option>
+                            <option value="Incoming Student" ${app.student_status === 'Incoming Student' ? 'selected' : ''}>Incoming Student</option>
+                            <option value="Continuing Student" ${app.student_status === 'Continuing Student' ? 'selected' : ''}>Continuing Student</option>
+                            <option value="Renewal Student" ${app.student_status === 'Renewal Student' ? 'selected' : ''}>Renewal Student</option>
+                        </select>
+                    </td></tr>
                 </table>
             `;
 
@@ -1729,12 +1758,17 @@ function viewApplicant(appId) {
                 yearLevelOptions += `<option value="${app.year_level}" selected>${app.year_level}</option>`;
             }
 
+            const incomingNotice = app.student_status === 'Incoming Student'
+                ? '<div class="alert alert-warning py-2 small mb-3">This applicant is tagged as Incoming Student. Academic fields may stay blank until enrollment is completed.</div>'
+                : '';
+
             document.getElementById('education-content').innerHTML = `
+                ${incomingNotice}
                 <table class="table table-borderless">
                     <tr><th width="30%">Program:</th><td><select class="form-select form-select-sm" name="program">${programOptions}</select></td></tr>
                     <tr><th>Year Level:</th><td><select class="form-select form-select-sm" name="year_level">${yearLevelOptions}</select></td></tr>
-                    <tr><th>Units Enrolled:</th><td><input type="number" class="form-control form-control-sm" name="units_enrolled" value="${app.units_enrolled}"></td></tr>
-                    <tr><th>GWA:</th><td><input type="number" step="0.01" class="form-control form-control-sm" name="gwa" value="${app.gwa}"></td></tr>
+                    <tr><th>Units Enrolled:</th><td><input type="number" class="form-control form-control-sm" name="units_enrolled" value="${app.units_enrolled || ''}"></td></tr>
+                    <tr><th>GWA:</th><td><input type="number" step="0.01" class="form-control form-control-sm" name="gwa" value="${app.gwa || ''}"></td></tr>
                 </table>
             `;
 
@@ -1766,23 +1800,14 @@ function viewApplicant(appId) {
             let docHtml = '';
             if(data.documents.length > 0) {
                 data.documents.forEach(d => {
-                    let normalizedFilePath = d.file_path;
-
-                    // Ensure filePath does not start with 'public/' if it's already relative to public
-                    if (normalizedFilePath.startsWith('public/')) {
-                        normalizedFilePath = normalizedFilePath.substring('public/'.length);
-                    }
-                    // Ensure filePath starts with 'uploads/'
-                    if (!normalizedFilePath.startsWith('uploads/')) {
-                        normalizedFilePath = 'uploads/' + normalizedFilePath;
-                    }
+                    const fileUrl = d.file_url || '#';
                     docHtml += `
                         <div class="col-md-6">
                             <div class="card h-100">
                                 <div class="card-body d-flex align-items-center">
                                     <i class="bi bi-file-earmark-pdf fs-2 text-danger me-3"></i>
                                     <div class="text-truncate">
-                                        <a href="#" onclick="viewDocument('../public/${normalizedFilePath}', '${d.file_name}'); return false;" class="text-decoration-none fw-bold stretched-link">${d.file_name}</a>
+                                        <a href="#" onclick="viewDocument('${fileUrl}', '${d.file_name}'); return false;" class="text-decoration-none fw-bold stretched-link">${d.file_name}</a>
                                     </div>
                                 </div>
                             </div>

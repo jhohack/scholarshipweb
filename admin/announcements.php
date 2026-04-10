@@ -35,30 +35,7 @@ require $base_path . '/vendor/autoload.php';
 
 // --- Database Migration: Ensure announcements table exists ---
 try {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS announcements (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        title VARCHAR(255) NOT NULL,
-        content TEXT NOT NULL,
-        is_active TINYINT(1) NOT NULL DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    )");
-
-    // Migration: Add image_path column if it doesn't exist
-    try {
-        $pdo->query("SELECT image_path FROM announcements LIMIT 1");
-    } catch (PDOException $e) {
-        $pdo->exec("ALTER TABLE announcements ADD COLUMN image_path VARCHAR(255) DEFAULT NULL");
-    }
-
-    // Migration: Create attachments table for multiple files
-    $pdo->exec("CREATE TABLE IF NOT EXISTS announcement_attachments (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        announcement_id INT NOT NULL,
-        file_path VARCHAR(255) NOT NULL,
-        file_name VARCHAR(255),
-        FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE
-    )");
+    dbEnsureAnnouncementsSchema($pdo);
 } catch (PDOException $e) {
     // Silently fail if table exists or other error, log in production
     error_log("Announcement table creation check failed: " . $e->getMessage());
@@ -94,17 +71,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $stmt->execute($params);
                         flashMessage("Announcement updated successfully!");
                     } else { // Create
-                        $stmt = $pdo->prepare("INSERT INTO announcements (title, content, is_active) VALUES (?, ?, ?)");
-                        $stmt->execute([$title, $content, $is_active]);
-                        $id = $pdo->lastInsertId();
+                        $id = dbExecuteInsert(
+                            $pdo,
+                            "INSERT INTO announcements (title, content, is_active) VALUES (?, ?, ?)",
+                            [$title, $content, $is_active]
+                        );
                         flashMessage("Announcement created successfully!");
                     }
 
                     // Handle Multiple File Uploads
                     if (!empty($_FILES['announcement_images']['name'][0])) {
-                        $upload_dir = $base_path . '/public/uploads/announcements/';
-                        if (!is_dir($upload_dir)) mkdir($upload_dir, 0777, true);
-                        
                         $files = $_FILES['announcement_images'];
                         $count = count($files['name']);
                         
@@ -114,9 +90,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             if ($files['error'][$i] === UPLOAD_ERR_OK) {
                                 $ext = strtolower(pathinfo($files['name'][$i], PATHINFO_EXTENSION));
                                 if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'doc', 'docx'])) {
-                                    $new_filename = uniqid('att_', true) . '.' . $ext;
-                                    if (move_uploaded_file($files['tmp_name'][$i], $upload_dir . $new_filename)) {
-                                        $stmt_att->execute([$id, 'uploads/announcements/' . $new_filename, $files['name'][$i]]);
+                                    $upload_result = storeUploadedFile(
+                                        $pdo,
+                                        [
+                                            'name' => $files['name'][$i],
+                                            'type' => $files['type'][$i],
+                                            'tmp_name' => $files['tmp_name'][$i],
+                                            'error' => $files['error'][$i],
+                                            'size' => $files['size'][$i],
+                                        ],
+                                        'announcements',
+                                        'att_',
+                                        [
+                                            'image/jpeg',
+                                            'image/png',
+                                            'image/gif',
+                                            'image/webp',
+                                            'application/pdf',
+                                            'application/msword',
+                                            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                        ],
+                                        appUploadMaxBytes(),
+                                        $base_path
+                                    );
+                                    if ($upload_result['success']) {
+                                        $stmt_att->execute([$id, $upload_result['path'], $files['name'][$i]]);
                                     }
                                 }
                             }
@@ -135,9 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt->execute([$att_id]);
                     $file = $stmt->fetchColumn();
                     
-                    if ($file && file_exists($base_path . '/public/' . $file)) {
-                        unlink($base_path . '/public/' . $file);
-                    }
+                    deleteStoredFileByPath($pdo, $file, $base_path);
                     
                     $pdo->prepare("DELETE FROM announcement_attachments WHERE id = ?")->execute([$att_id]);
                     flashMessage("Attachment removed.");
@@ -653,8 +649,8 @@ if ($action === 'email_blast') {
                     <div class="row g-2 mt-3">
                         <?php foreach ($attachments as $att): ?>
                             <div class="col-auto position-relative">
-                                <?php if (preg_match('/\.(jpg|jpeg|png|gif|webp)$/i', $att['file_path'])): ?>
-                                    <img src="../public/<?php echo htmlspecialchars($att['file_path']); ?>" class="rounded border" style="width: 100px; height: 100px; object-fit: cover;">
+                                <?php if (preg_match('/\.(jpg|jpeg|png|gif|webp)$/i', $att['file_name'] ?? '')): ?>
+                                    <img src="<?php echo htmlspecialchars(storedFilePathToUrl($att['file_path'] ?? '')); ?>" class="rounded border" style="width: 100px; height: 100px; object-fit: cover;">
                                 <?php else: ?>
                                     <div class="rounded border d-flex align-items-center justify-content-center bg-light" style="width: 100px; height: 100px;">
                                         <i class="bi bi-file-earmark-text fs-3"></i>

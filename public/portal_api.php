@@ -47,9 +47,11 @@ try {
             // If not found, create one
             if (!$conversation) {
                 $subject = "Student Inquiry";
-                $stmt_create = $pdo->prepare("INSERT INTO conversations (student_user_id, subject) VALUES (?, ?)");
-                $stmt_create->execute([$user_id, $subject]);
-                $conversation_id = $pdo->lastInsertId();
+                $conversation_id = dbExecuteInsert(
+                    $pdo,
+                    "INSERT INTO conversations (student_user_id, subject) VALUES (?, ?)",
+                    [$user_id, $subject]
+                );
                 
                 // Fetch the newly created conversation
                 $stmt->execute([$user_id]);
@@ -73,6 +75,12 @@ try {
             $msg_stmt->execute([$conversation_id]);
             $messages = $msg_stmt->fetchAll(PDO::FETCH_ASSOC);
 
+            foreach ($messages as &$message_row) {
+                $message_row['profile_picture_url'] = storedFilePathToUrl($message_row['profile_picture_path'] ?? '');
+                $message_row['attachment_url'] = storedFilePathToUrl($message_row['attachment_path'] ?? '');
+            }
+            unset($message_row);
+
             $pdo->commit();
 
             $response = ['success' => true, 'conversation' => $conversation, 'messages' => $messages];
@@ -90,9 +98,11 @@ try {
                 $conversation_id = $stmt->fetchColumn();
 
                 if (!$conversation_id) {
-                    $stmt_create = $pdo->prepare("INSERT INTO conversations (student_user_id, subject) VALUES (?, 'Student Inquiry')");
-                    $stmt_create->execute([$user_id]);
-                    $conversation_id = $pdo->lastInsertId();
+                    $conversation_id = dbExecuteInsert(
+                        $pdo,
+                        "INSERT INTO conversations (student_user_id, subject) VALUES (?, 'Student Inquiry')",
+                        [$user_id]
+                    );
                 }
             }
 
@@ -118,27 +128,29 @@ try {
 
             // Handle file upload
             if (isset($_FILES['attachment']) && $_FILES['attachment']['error'] === UPLOAD_ERR_OK) {
-                $upload_dir = $base_path . '/public/uploads/chat_attachments/';
-                if (!is_dir($upload_dir)) {
-                    mkdir($upload_dir, 0777, true);
-                }
                 $allowed_types = ['image/jpeg', 'image/png', 'image/gif'];
-                if (in_array($_FILES['attachment']['type'], $allowed_types)) {
-                    $safe_filename = preg_replace('/[^A-Za-z0-9.\-]/', '_', basename($_FILES['attachment']['name']));
-                    $new_filename = 'chat_' . $conversation_id . '_' . uniqid() . '_' . $safe_filename;
-                    $destination = $upload_dir . $new_filename;
-
-                    if (move_uploaded_file($_FILES['attachment']['tmp_name'], $destination)) {
-                        $attachment_path = 'uploads/chat_attachments/' . $new_filename;
-                    } else {
-                        $response['message'] = 'Failed to upload attachment.';
-                        @ob_clean();
-                        header('Content-Type: application/json');
-                        echo json_encode($response);
-                        exit();
-                    }
-                } else {
+                if (!in_array($_FILES['attachment']['type'], $allowed_types, true)) {
                     $response['message'] = 'Invalid file type. Only JPG, PNG, or GIF are allowed.';
+                    @ob_clean();
+                    header('Content-Type: application/json');
+                    echo json_encode($response);
+                    exit();
+                }
+
+                $upload_result = storeUploadedFile(
+                    $pdo,
+                    $_FILES['attachment'],
+                    'chat_attachments',
+                    'chat_' . $conversation_id . '_',
+                    $allowed_types,
+                    appUploadMaxBytes(),
+                    $base_path
+                );
+
+                if ($upload_result['success']) {
+                    $attachment_path = $upload_result['path'];
+                } else {
+                    $response['message'] = $upload_result['error'] ?? 'Failed to upload attachment.';
                     @ob_clean();
                     header('Content-Type: application/json');
                     echo json_encode($response);
@@ -150,7 +162,7 @@ try {
             $stmt->execute([$conversation_id, $user_id, $message, $attachment_path]);
 
             // Update conversation timestamp
-            $update_stmt = $pdo->prepare("UPDATE conversations SET updated_at = NOW(), status = ? WHERE id = ?");
+            $update_stmt = $pdo->prepare("UPDATE conversations SET updated_at = CURRENT_TIMESTAMP, status = ? WHERE id = ?");
             $new_status = $is_admin ? 'pending_student' : 'pending_admin';
             $update_stmt->execute([$new_status, $conversation_id]);
 
@@ -190,6 +202,12 @@ try {
             $stmt->execute([$conversation_id]);
             $messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+            foreach ($messages as &$message_row) {
+                $message_row['profile_picture_url'] = storedFilePathToUrl($message_row['profile_picture_path'] ?? '');
+                $message_row['attachment_url'] = storedFilePathToUrl($message_row['attachment_path'] ?? '');
+            }
+            unset($message_row);
+
             $response = ['success' => true, 'messages' => $messages];
             break;
 
@@ -213,6 +231,11 @@ try {
             ");
             $stmt->execute();
             $conversations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            foreach ($conversations as &$conversation_row) {
+                $conversation_row['profile_picture_url'] = storedFilePathToUrl($conversation_row['profile_picture_path'] ?? '');
+            }
+            unset($conversation_row);
             $response = ['success' => true, 'conversations' => $conversations];
             break;
     }
