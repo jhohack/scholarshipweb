@@ -58,6 +58,19 @@ function formatAcademicDisplay(array $application, string $field): string {
     return ($value === null || $value === '') ? '-' : (string)$value;
 }
 
+function isApplicationsJsonRequest(): bool {
+    return (($_GET['action'] ?? '') === 'get_details' && isset($_GET['app_id']))
+        || isset($_GET['ajax_search']);
+}
+
+function respondWithJson(array $payload, int $statusCode = 200): void {
+    http_response_code($statusCode);
+    header('Content-Type: application/json; charset=UTF-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    echo json_encode($payload);
+    exit;
+}
+
 dbEnsureNotificationsTable($pdo);
 dbEnsureApplicationsSchema($pdo);
 
@@ -78,6 +91,19 @@ for ($i = 1; $i <= 4; $i++) {
     $stmt->execute([$standard_yl, "%{$i}{$suffix}%", "% $i%", "%-$i%"]);
 }
 
+$scholarship_id = filter_input(INPUT_GET, 'scholarship_id', FILTER_SANITIZE_NUMBER_INT);
+$action = $_GET['action'] ?? 'list';
+$isJsonRequest = isApplicationsJsonRequest();
+
+if ($isJsonRequest && isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > 3000) {
+    session_unset();
+    session_destroy();
+    respondWithJson([
+        'error' => 'Your admin session expired. Please log in again.',
+        'session_expired' => true,
+    ], 401);
+}
+
 checkSessionTimeout();
 
 $autoRejectNote = "\nSystem: Auto-rejected due to approval in another scholarship.";
@@ -86,6 +112,11 @@ if (!isAdmin()) {
     if (isset($_SESSION['role']) && $_SESSION['role'] === 'staff') {
         $perms = $_SESSION['permissions'] ?? [];
         if (!in_array('applications.php', $perms)) {
+            if ($isJsonRequest) {
+                respondWithJson([
+                    'error' => 'You do not have permission to view applicant details.',
+                ], 403);
+            }
             header("Location: dashboard.php");
             exit();
         }
@@ -93,18 +124,23 @@ if (!isAdmin()) {
             die("Action Restricted: Staff accounts are View Only.");
         }
     } else {
+        if ($isJsonRequest) {
+            respondWithJson([
+                'error' => 'Your admin session expired. Please log in again.',
+                'session_expired' => true,
+            ], 401);
+        }
         header("Location: login.php");
         exit();
     }
 }
 
-$scholarship_id = filter_input(INPUT_GET, 'scholarship_id', FILTER_SANITIZE_NUMBER_INT);
-$action = $_GET['action'] ?? 'list';
-
 // --- AJAX: Get Applicant Details ---
 if ($action === 'get_details' && isset($_GET['app_id'])) {
     $app_id = filter_input(INPUT_GET, 'app_id', FILTER_SANITIZE_NUMBER_INT);
     try {
+        header('Content-Type: application/json; charset=UTF-8');
+
         // 1. Application & Student Info
         $stmt = $pdo->prepare("
             SELECT a.*, s.student_name, s.school_id_number, s.email, s.phone, s.date_of_birth,
@@ -118,8 +154,7 @@ if ($action === 'get_details' && isset($_GET['app_id'])) {
         $app = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$app) {
-            echo json_encode(['error' => 'Application not found']);
-            exit;
+            respondWithJson(['error' => 'Application not found'], 404);
         }
 
         // 2. Form Responses
@@ -155,16 +190,18 @@ if ($action === 'get_details' && isset($_GET['app_id'])) {
         $stmt->execute([$app['student_id'], $app['scholarship_id']]);
         $exam = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        echo json_encode([
+        respondWithJson([
             'application' => $app,
             'responses' => $responses,
             'documents' => $documents,
             'exam' => $exam
         ]);
-    } catch (PDOException $e) {
-        echo json_encode(['error' => $e->getMessage()]);
+    } catch (Throwable $e) {
+        error_log("Failed to load applicant details for application {$app_id}: " . $e->getMessage());
+        respondWithJson([
+            'error' => 'Unable to load applicant details right now. Please try again.',
+        ], 500);
     }
-    exit;
 }
 
 // --- Handle Details Update (POST) ---
@@ -1552,6 +1589,52 @@ document.addEventListener('DOMContentLoaded', function() {
 
 let currentPage = 1;
 
+async function fetchJsonResponse(url) {
+    const response = await fetch(url, {
+        credentials: 'same-origin',
+        headers: {
+            'Accept': 'application/json'
+        }
+    });
+
+    const responseUrl = response.url || '';
+    const contentType = response.headers.get('content-type') || '';
+    const rawText = await response.text();
+    let data = null;
+
+    if (rawText !== '') {
+        try {
+            data = JSON.parse(rawText);
+        } catch (parseError) {
+            if (response.redirected || /login\.php/i.test(responseUrl)) {
+                const sessionError = new Error('Your admin session expired. Please log in again.');
+                sessionError.sessionExpired = true;
+                throw sessionError;
+            }
+
+            const unexpectedError = new Error('The server returned an unexpected response while loading data.');
+            unexpectedError.responseSnippet = rawText.slice(0, 200);
+            throw unexpectedError;
+        }
+    }
+
+    if (response.redirected || /login\.php/i.test(responseUrl) || data?.session_expired) {
+        const sessionError = new Error(data?.error || 'Your admin session expired. Please log in again.');
+        sessionError.sessionExpired = true;
+        throw sessionError;
+    }
+
+    if (!response.ok) {
+        throw new Error(data?.error || `Request failed with status ${response.status}.`);
+    }
+
+    if (!contentType.includes('application/json') && data === null) {
+        throw new Error('The server returned an unexpected response while loading data.');
+    }
+
+    return data ?? {};
+}
+
 function changePage(page) {
     if (page < 1) return;
     currentPage = page;
@@ -1571,8 +1654,7 @@ function performLiveSearch() {
     // Show loading spinner
     document.getElementById('applicantsTableBody').innerHTML = '<tr><td colspan="9" class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></td></tr>';
 
-    fetch(url)
-        .then(response => response.json())
+    fetchJsonResponse(url)
         .then(data => {
             document.getElementById('applicantsTableBody').innerHTML = data.rows;
             document.getElementById('paginationContainer').innerHTML = data.pagination;
@@ -1592,7 +1674,17 @@ function performLiveSearch() {
                 if(document.getElementById('stat-renewal')) document.getElementById('stat-renewal').textContent = data.types.renewal_apps;
             }
         })
-        .catch(error => console.error('Error:', error));
+        .catch(error => {
+            console.error('Error loading applications:', error);
+            const tableBody = document.getElementById('applicantsTableBody');
+            if (tableBody) {
+                tableBody.innerHTML = `<tr><td colspan="12" class="text-center py-4 text-danger">${escapeHtml(error.message || 'Unable to load applications right now.')}</td></tr>`;
+            }
+
+            if (error.sessionExpired) {
+                window.location.href = 'login.php?timeout=1';
+            }
+        });
 }
 
 function viewApplicant(appId) {
@@ -1606,8 +1698,7 @@ function viewApplicant(appId) {
     document.getElementById('detailsAppId').value = appId;
     
     // Fetch Data
-    fetch(`applications.php?action=get_details&app_id=${appId}`)
-        .then(response => response.json())
+    fetchJsonResponse(`applications.php?action=get_details&app_id=${appId}`)
         .then(data => {
             if(data.error) {
                 alert(data.error);
@@ -1864,7 +1955,10 @@ function viewApplicant(appId) {
         })
         .catch(error => {
             console.error('Error fetching details:', error);
-            alert('Failed to load applicant details. Please try again.');
+            alert(error.message || 'Failed to load applicant details. Please try again.');
+            if (error.sessionExpired) {
+                window.location.href = 'login.php?timeout=1';
+            }
         });
 }
 
