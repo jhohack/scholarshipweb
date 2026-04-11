@@ -72,6 +72,22 @@ if ($targetExtension !== 'php') {
     exit();
 }
 
+$sessionSafePaths = [
+    '/admin/',
+    '/student/',
+    '/public/',
+];
+
+foreach ($sessionSafePaths as $pathPrefix) {
+    if (str_starts_with($requestPath, $pathPrefix) || $requestPath === '/' || preg_match('/\.php$/i', $requestPath)) {
+        require_once $rootPath . '/includes/config.php';
+        require_once $rootPath . '/includes/db.php';
+        require_once $rootPath . '/includes/session_handler.php';
+        registerDatabaseSessionHandler($pdo);
+        break;
+    }
+}
+
 $originalPhpSelf = $_SERVER['PHP_SELF'] ?? null;
 $originalScriptName = $_SERVER['SCRIPT_NAME'] ?? null;
 $originalScriptFilename = $_SERVER['SCRIPT_FILENAME'] ?? null;
