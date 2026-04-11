@@ -7,7 +7,12 @@ if (session_status() === PHP_SESSION_NONE) {
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/mailer.php';
+require_once __DIR__ . '/../includes/functions.php';
 $base_path = dirname(__DIR__);
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' && !isset($_SESSION['user_id']) && !isset($_SESSION['2fa_user_id']) && isset($_COOKIE[session_name()])) {
+    clearCurrentSessionCookie();
+}
 
 // Check if user is already logged in
 if (isset($_SESSION['user_id'])) {

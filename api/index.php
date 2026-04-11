@@ -80,6 +80,18 @@ $sessionSafePaths = [
 
 foreach ($sessionSafePaths as $pathPrefix) {
     if (str_starts_with($requestPath, $pathPrefix) || $requestPath === '/' || preg_match('/\.php$/i', $requestPath)) {
+        $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+        ini_set('session.use_only_cookies', '1');
+        ini_set('session.use_strict_mode', '1');
+        session_set_cookie_params([
+            'lifetime' => 0,
+            'path' => '/',
+            'secure' => $isHttps,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+
         require_once $rootPath . '/includes/config.php';
         require_once $rootPath . '/includes/db.php';
         require_once $rootPath . '/includes/session_handler.php';

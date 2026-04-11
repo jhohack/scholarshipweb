@@ -22,6 +22,36 @@ function redirect($url) {
     exit();
 }
 
+if (!function_exists('clearCurrentSessionCookie')) {
+    function clearCurrentSessionCookie(): void
+    {
+        if (headers_sent()) {
+            return;
+        }
+
+        $params = session_get_cookie_params();
+        $path = $params['path'] ?? '/';
+        $domain = $params['domain'] ?? '';
+        $secure = (bool) ($params['secure'] ?? false);
+        $httpOnly = (bool) ($params['httponly'] ?? true);
+
+        setcookie(session_name(), '', time() - 3600, $path, $domain, $secure, $httpOnly);
+
+        if (PHP_VERSION_ID >= 70300) {
+            setcookie(session_name(), '', [
+                'expires' => time() - 3600,
+                'path' => $path,
+                'domain' => $domain,
+                'secure' => $secure,
+                'httponly' => $httpOnly,
+                'samesite' => $params['samesite'] ?? 'Lax',
+            ]);
+        }
+
+        unset($_COOKIE[session_name()]);
+    }
+}
+
 /**
  * Check if the user is logged in.
  *
@@ -228,6 +258,7 @@ function checkSessionTimeout($timeout_duration = 3000) {
 
         session_unset();
         session_destroy();
+        clearCurrentSessionCookie();
         header("Location: " . $redirect_url);
         exit();
     }

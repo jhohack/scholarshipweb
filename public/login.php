@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/functions.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -15,6 +16,10 @@ try {
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' && !isset($_SESSION['user_id']) && isset($_COOKIE[session_name()])) {
+    clearCurrentSessionCookie();
 }
 
 $error = '';
