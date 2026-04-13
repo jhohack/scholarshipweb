@@ -109,6 +109,14 @@ if (!function_exists('renderApplicationNoticePage')) {
 // --- Core Rule Checks ---
 $user_id = $_SESSION['user_id'];
 $can_renew = false;
+
+// The public header polls portal_api.php every 5 seconds for unread messages.
+// Releasing the session lock here prevents those background requests from
+// blocking a long multipart application submission on the same session.
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
+
 try {
     // 1. Get Student ID
     $stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");

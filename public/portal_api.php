@@ -29,6 +29,13 @@ $user_id = $_SESSION['user_id'];
 $is_admin = isAdmin();
 $response = ['success' => false, 'message' => 'Invalid action.'];
 
+// This endpoint is polled in the background from the shared public header.
+// Release the session lock after reading auth data so it does not block
+// long-running requests like scholarship application submissions.
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
+
 try {
     switch ($action) {
         case 'get_or_create_student_conversation':

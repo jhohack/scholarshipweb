@@ -14,6 +14,8 @@ $unread_messages = 0;
 if (isset($_SESSION['user_id']) && isset($_SESSION['role']) && $_SESSION['role'] === 'student') {
     $unread_messages = getUnreadMessageCount($pdo, $_SESSION['user_id']);
 }
+
+$disable_unread_polling = in_array($current_page, ['apply.php', 'entrance-exam.php'], true);
 ?>
 <header id="main-header" class="sticky-top">
     <div class="nav-progress" aria-hidden="true"></div>
@@ -111,6 +113,7 @@ if (isset($_SESSION['user_id']) && isset($_SESSION['role']) && $_SESSION['role']
             </div>
         </div>
     </nav>
+    <?php if (!$disable_unread_polling): ?>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const navLinks = document.querySelectorAll('.main-nav-link');
@@ -156,4 +159,5 @@ if (isset($_SESSION['user_id']) && isset($_SESSION['role']) && $_SESSION['role']
             setInterval(updateUnreadCount, 5000); // Poll every 5 seconds
         });
     </script>
+    <?php endif; ?>
 </header>
