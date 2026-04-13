@@ -169,7 +169,7 @@ if ($action === 'get_details' && isset($_GET['app_id'])) {
         $responses = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // 3. Documents
-        $stmt = $pdo->prepare("SELECT file_name, file_path FROM documents WHERE application_id = ?");
+        $stmt = $pdo->prepare("SELECT id, file_name, file_path FROM documents WHERE application_id = ?");
         $stmt->execute([$app_id]);
         $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
         foreach ($documents as &$document) {
@@ -177,6 +177,7 @@ if ($action === 'get_details' && isset($_GET['app_id'])) {
             $document['file_url'] = $fileInfo['url'];
             $document['file_exists'] = $fileInfo['exists'];
             $document['file_status'] = $fileInfo['reason'];
+            $document['can_replace_missing'] = $fileInfo['reason'] === 'legacy_upload_missing';
         }
         unset($document);
 
@@ -202,6 +203,38 @@ if ($action === 'get_details' && isset($_GET['app_id'])) {
             'error' => 'Unable to load applicant details right now. Please try again.',
         ], 500);
     }
+}
+
+// --- Handle Missing Legacy Document Replacement (POST) ---
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['replace_missing_document'])) {
+    $document_id = filter_input(INPUT_POST, 'document_id', FILTER_SANITIZE_NUMBER_INT);
+    $app_id = filter_input(INPUT_POST, 'application_id', FILTER_SANITIZE_NUMBER_INT);
+    $scholarship_id_redirect = filter_input(INPUT_POST, 'scholarship_id', FILTER_SANITIZE_NUMBER_INT);
+    $replacement_file = $_FILES['replacement_document'] ?? null;
+
+    if (!validate_csrf_token($_POST['csrf_token'] ?? '')) {
+        flashMessage('Your session expired. Please refresh the page and try again.');
+    } elseif (!$document_id || !$app_id || !$replacement_file) {
+        flashMessage('Please choose the missing document and attach a replacement PDF.');
+    } else {
+        $replace_result = replaceLegacyMissingDocument(
+            $pdo,
+            $document_id,
+            $replacement_file,
+            null,
+            $app_id,
+            $base_path
+        );
+
+        if (!empty($replace_result['success'])) {
+            flashMessage('Missing legacy document replaced successfully.');
+        } else {
+            flashMessage($replace_result['error'] ?? 'Unable to replace the missing document right now.');
+        }
+    }
+
+    header("Location: applications.php?scholarship_id=" . $scholarship_id_redirect);
+    exit();
 }
 
 // --- Handle Details Update (POST) ---
@@ -1471,6 +1504,17 @@ displayFlashMessages();
     </div>
 </div>
 
+<?php if (isAdmin()): ?>
+<form action="applications.php" method="POST" enctype="multipart/form-data" id="replaceMissingDocumentForm" class="d-none">
+    <input type="hidden" name="replace_missing_document" value="1">
+    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+    <input type="hidden" name="scholarship_id" value="<?php echo (int) $scholarship_id; ?>">
+    <input type="hidden" name="application_id" id="replaceMissingDocumentAppId">
+    <input type="hidden" name="document_id" id="replaceMissingDocumentId">
+    <input type="file" name="replacement_document" id="replaceMissingDocumentInput" accept=".pdf,application/pdf">
+</form>
+<?php endif; ?>
+
 <!-- Document Preview Modal -->
 <div class="modal fade" id="documentPreviewModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-fullscreen">
@@ -1492,6 +1536,7 @@ displayFlashMessages();
 <script>
 const availablePrograms = <?php echo json_encode($distinct_programs ?? []); ?>;
 const availableYearLevels = <?php echo json_encode($distinct_year_levels ?? []); ?>;
+const isAdminUser = <?php echo isAdmin() ? 'true' : 'false'; ?>;
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -1508,6 +1553,30 @@ function bindDocumentPreviewButtons() {
             const url = decodeURIComponent(this.dataset.url || '');
             const title = decodeURIComponent(this.dataset.title || 'Document');
             viewDocument(url, title);
+        });
+    });
+}
+
+function bindDocumentReplacementButtons(applicationId) {
+    if (!isAdminUser) {
+        return;
+    }
+
+    const replacementForm = document.getElementById('replaceMissingDocumentForm');
+    const replacementInput = document.getElementById('replaceMissingDocumentInput');
+    const replacementAppId = document.getElementById('replaceMissingDocumentAppId');
+    const replacementDocumentId = document.getElementById('replaceMissingDocumentId');
+
+    if (!replacementForm || !replacementInput || !replacementAppId || !replacementDocumentId) {
+        return;
+    }
+
+    document.querySelectorAll('.document-replace-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            replacementAppId.value = applicationId || '';
+            replacementDocumentId.value = this.dataset.documentId || '';
+            replacementInput.value = '';
+            replacementInput.click();
         });
     });
 }
@@ -1583,6 +1652,16 @@ document.addEventListener('DOMContentLoaded', function() {
             if (statusFilterInput) statusFilterInput.value = 'all';
             currentPage = 1;
             performLiveSearch();
+        });
+    }
+
+    const replacementForm = document.getElementById('replaceMissingDocumentForm');
+    const replacementInput = document.getElementById('replaceMissingDocumentInput');
+    if (replacementForm && replacementInput) {
+        replacementInput.addEventListener('change', function() {
+            if (replacementInput.files && replacementInput.files.length > 0) {
+                replacementForm.submit();
+            }
         });
     }
 });
@@ -1911,17 +1990,23 @@ function viewApplicant(appId) {
                     const encodedUrl = encodeURIComponent(fileUrl);
                     const encodedTitle = encodeURIComponent(fileName);
                     const unavailableNote = d.file_status === 'legacy_upload_missing'
-                        ? 'Legacy upload not found in current storage.'
+                        ? 'Legacy file missing from current storage.'
                         : 'File is unavailable.';
                     docHtml += `
                         <div class="col-md-6">
                             <div class="card h-100">
-                                <div class="card-body d-flex align-items-center">
+                                <div class="card-body d-flex align-items-start">
                                     <i class="bi bi-file-earmark-pdf fs-2 text-danger me-3"></i>
-                                    <div class="text-truncate">
+                                    <div class="flex-grow-1">
                                         ${d.file_exists
                                             ? `<button type="button" class="btn btn-link p-0 text-start text-decoration-none fw-bold stretched-link document-preview-btn" data-url="${encodedUrl}" data-title="${encodedTitle}">${escapeHtml(fileName)}</button>`
-                                            : `<div class="fw-bold text-muted">${escapeHtml(fileName)}</div><small class="text-warning">${escapeHtml(unavailableNote)}</small>`
+                                            : `<div class="fw-bold text-muted">${escapeHtml(fileName)}</div>
+                                               <small class="text-warning d-block">${escapeHtml(unavailableNote)}</small>
+                                               ${d.can_replace_missing && isAdminUser
+                                                    ? `<button type="button" class="btn btn-sm btn-outline-primary mt-2 document-replace-btn" data-document-id="${Number(d.id || 0)}">
+                                                            <i class="bi bi-upload me-1"></i>Upload Replacement PDF
+                                                       </button>`
+                                                    : ''}`
                                         }
                                     </div>
                                 </div>
@@ -1933,6 +2018,7 @@ function viewApplicant(appId) {
             }
             document.getElementById('documents-content').innerHTML = docHtml;
             bindDocumentPreviewButtons();
+            bindDocumentReplacementButtons(app.id);
 
             // Exam
             let examHtml = '';

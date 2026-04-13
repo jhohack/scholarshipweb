@@ -92,7 +92,7 @@ if ($applicationId) {
                                     </a>
                                 <?php else: ?>
                                     <span class="text-muted"><?php echo htmlspecialchars($document['file_name'] ?? 'Document'); ?></span>
-                                    <small class="text-warning">(legacy upload missing)</small>
+                                    <small class="text-warning">(legacy file missing; replace it from the main Applications page)</small>
                                 <?php endif; ?>
                             </li>
                         <?php endforeach; ?>
