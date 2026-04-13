@@ -24,7 +24,10 @@ if (!function_exists('env_config')) {
 
 $httpHost = $_SERVER['HTTP_HOST'] ?? '';
 $isLocalHost = $httpHost === '' || strpos($httpHost, 'localhost') === 0 || strpos($httpHost, '127.0.0.1') === 0;
-$requestScheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$requestScheme = (
+    (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
+) ? 'https' : 'http';
 $defaultBasePath = env_config('APP_BASE_PATH', $isLocalHost ? '/websitescholarship/scholarship-portal' : '');
 $derivedBaseUrl = $httpHost !== '' ? $requestScheme . '://' . $httpHost . $defaultBasePath : 'http://localhost/websitescholarship/scholarship-portal';
 
