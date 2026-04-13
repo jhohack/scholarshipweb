@@ -275,17 +275,31 @@ if (!function_exists('storeUploadedFile')) {
                 return ['success' => false, 'error' => "Failed to read uploaded file '{$originalName}'."];
             }
 
+            if (strlen($blobContents) === 0) {
+                return ['success' => false, 'error' => "Uploaded file '{$originalName}' is empty."];
+            }
+
             $stmt = $pdo->prepare("
                 INSERT INTO uploaded_files (storage_key, folder_name, original_name, mime_type, file_size, content_blob)
                 VALUES (?, ?, ?, ?, ?, ?)
             ");
-            $stmt->bindValue(1, $storageKey);
-            $stmt->bindValue(2, $folder !== '' ? $folder : null);
-            $stmt->bindValue(3, $safeFilename);
-            $stmt->bindValue(4, $mimeType);
+            
+            // Use bindValue for all parameters to ensure proper data handling
+            // For LOB, we pass the binary string directly rather than using PARAM_LOB
+            $stmt->bindValue(1, $storageKey, PDO::PARAM_STR);
+            $stmt->bindValue(2, $folder !== '' ? $folder : null, PDO::PARAM_STR);
+            $stmt->bindValue(3, $safeFilename, PDO::PARAM_STR);
+            $stmt->bindValue(4, $mimeType, PDO::PARAM_STR);
             $stmt->bindValue(5, $fileSize, PDO::PARAM_INT);
-            $stmt->bindParam(6, $blobContents, PDO::PARAM_LOB);
-            $stmt->execute();
+            $stmt->bindValue(6, $blobContents, PDO::PARAM_STR); // Bind as string, not LOB
+            
+            $result = $stmt->execute();
+            
+            if (!$result) {
+                $errorInfo = $stmt->errorInfo();
+                error_log("Database insert failed for file '{$originalName}': " . json_encode($errorInfo));
+                return ['success' => false, 'error' => "Failed to store file in database."];
+            }
 
             return [
                 'success' => true,
@@ -345,17 +359,28 @@ if (!function_exists('storeExistingFileFromDisk')) {
                 return ['success' => false, 'error' => "Failed to read file '{$absolutePath}'."];
             }
 
+            if (strlen($blobContents) === 0) {
+                return ['success' => false, 'error' => "File '{$absolutePath}' is empty."];
+            }
+
             $stmt = $pdo->prepare("
                 INSERT INTO uploaded_files (storage_key, folder_name, original_name, mime_type, file_size, content_blob)
                 VALUES (?, ?, ?, ?, ?, ?)
             ");
-            $stmt->bindValue(1, $storageKey);
-            $stmt->bindValue(2, $folder !== '' ? $folder : null);
-            $stmt->bindValue(3, $safeFilename);
-            $stmt->bindValue(4, $mimeType);
+            $stmt->bindValue(1, $storageKey, PDO::PARAM_STR);
+            $stmt->bindValue(2, $folder !== '' ? $folder : null, PDO::PARAM_STR);
+            $stmt->bindValue(3, $safeFilename, PDO::PARAM_STR);
+            $stmt->bindValue(4, $mimeType, PDO::PARAM_STR);
             $stmt->bindValue(5, $fileSize, PDO::PARAM_INT);
-            $stmt->bindParam(6, $blobContents, PDO::PARAM_LOB);
-            $stmt->execute();
+            $stmt->bindValue(6, $blobContents, PDO::PARAM_STR); // Bind as string, not LOB
+            
+            $result = $stmt->execute();
+            
+            if (!$result) {
+                $errorInfo = $stmt->errorInfo();
+                error_log("Database insert failed for file '{$absolutePath}': " . json_encode($errorInfo));
+                return ['success' => false, 'error' => "Failed to store file in database."];
+            }
 
             return [
                 'success' => true,
