@@ -22,12 +22,21 @@ if ($storageKey === '') {
 try {
     ensureUploadedFilesTable($pdo);
 
-    $stmt = $pdo->prepare("
-        SELECT original_name, mime_type, file_size, content_blob
-        FROM uploaded_files
-        WHERE storage_key = ?
-        LIMIT 1
-    ");
+    if (dbIsPgsql($pdo)) {
+        $stmt = $pdo->prepare("
+            SELECT original_name, mime_type, file_size, encode(content_blob, 'base64') AS content_blob_base64
+            FROM uploaded_files
+            WHERE storage_key = ?
+            LIMIT 1
+        ");
+    } else {
+        $stmt = $pdo->prepare("
+            SELECT original_name, mime_type, file_size, content_blob
+            FROM uploaded_files
+            WHERE storage_key = ?
+            LIMIT 1
+        ");
+    }
     $stmt->execute([$storageKey]);
     $file = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -39,7 +48,21 @@ try {
     $originalName = $file['original_name'] ?? 'download';
     $mimeType = $file['mime_type'] ?? 'application/octet-stream';
     $fileSize = (int) ($file['file_size'] ?? 0);
-    $blobContent = $file['content_blob'] ?? '';
+    if (dbIsPgsql($pdo)) {
+        $blobContent = base64_decode((string) ($file['content_blob_base64'] ?? ''), true);
+        if ($blobContent === false) {
+            throw new RuntimeException('Failed to decode stored document bytes.');
+        }
+    } else {
+        $blobContent = $file['content_blob'] ?? '';
+        if (is_resource($blobContent)) {
+            $blobContent = stream_get_contents($blobContent);
+        }
+    }
+
+    if (!is_string($blobContent)) {
+        throw new RuntimeException('Unexpected document blob type: ' . gettype($blobContent));
+    }
 
     // Validate blob is not empty
     if (empty($blobContent)) {
@@ -66,7 +89,12 @@ try {
     header('Content-Type: ' . $mimeType);
     header('Content-Length: ' . $actualSize);
     header('Cache-Control: public, max-age=31536000, immutable');
-    header('Content-Disposition: ' . ($isInline ? 'inline' : 'attachment') . '; filename="' . rawurlencode($originalName) . '"');
+    header(
+        'Content-Disposition: '
+        . ($isInline ? 'inline' : 'attachment')
+        . '; filename="' . addcslashes($originalName, "\"\\") . '"'
+        . "; filename*=UTF-8''" . rawurlencode($originalName)
+    );
     header('Accept-Ranges: bytes');
     
     // Flush output before sending binary data
@@ -82,4 +110,3 @@ try {
     http_response_code(500);
     exit('Unable to load file.');
 }
-
