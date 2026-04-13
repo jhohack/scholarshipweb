@@ -235,6 +235,52 @@ if (!function_exists('deleteStoredFileByPath')) {
     }
 }
 
+if (!function_exists('storageSanitizeFilename')) {
+    function storageSanitizeFilename(string $originalName): string
+    {
+        $candidate = trim(str_replace(["\0", "\r", "\n"], '', $originalName));
+        $baseName = basename($candidate !== '' ? $candidate : 'file');
+        $safeFilename = preg_replace('/[^A-Za-z0-9.\-]/', '_', $baseName);
+        $safeFilename = trim((string) $safeFilename, '._');
+
+        return $safeFilename !== '' ? $safeFilename : 'file';
+    }
+}
+
+if (!function_exists('insertStoredBlobRecord')) {
+    function insertStoredBlobRecord(PDO $pdo, string $storageKey, ?string $folder, string $originalName, string $mimeType, int $fileSize, string $blobContents): bool
+    {
+        if (dbIsPgsql($pdo)) {
+            $stmt = $pdo->prepare("
+                INSERT INTO uploaded_files (storage_key, folder_name, original_name, mime_type, file_size, content_blob)
+                VALUES (?, ?, ?, ?, ?, decode(?, 'hex'))
+            ");
+
+            return $stmt->execute([
+                $storageKey,
+                $folder,
+                $originalName,
+                $mimeType,
+                $fileSize,
+                bin2hex($blobContents),
+            ]);
+        }
+
+        $stmt = $pdo->prepare("
+            INSERT INTO uploaded_files (storage_key, folder_name, original_name, mime_type, file_size, content_blob)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ");
+        $stmt->bindValue(1, $storageKey, PDO::PARAM_STR);
+        $stmt->bindValue(2, $folder, PDO::PARAM_STR);
+        $stmt->bindValue(3, $originalName, PDO::PARAM_STR);
+        $stmt->bindValue(4, $mimeType, PDO::PARAM_STR);
+        $stmt->bindValue(5, $fileSize, PDO::PARAM_INT);
+        $stmt->bindValue(6, $blobContents, PDO::PARAM_LOB);
+
+        return $stmt->execute();
+    }
+}
+
 if (!function_exists('storeUploadedFile')) {
     function storeUploadedFile(PDO $pdo, array $file, string $folder = '', string $namePrefix = 'file_', ?array $allowedTypes = null, ?int $maxBytes = null, ?string $basePath = null): array
     {
@@ -263,7 +309,7 @@ if (!function_exists('storeUploadedFile')) {
         }
 
         $folder = trim(str_replace('\\', '/', $folder), '/');
-        $safeFilename = preg_replace('/[^A-Za-z0-9.\-]/', '_', basename($originalName));
+        $safeFilename = storageSanitizeFilename($originalName);
         $prefix = preg_replace('/[^A-Za-z0-9_\-]/', '_', $namePrefix);
 
         if (appUsesDatabaseUploads()) {
@@ -279,24 +325,20 @@ if (!function_exists('storeUploadedFile')) {
                 return ['success' => false, 'error' => "Uploaded file '{$originalName}' is empty."];
             }
 
-            $stmt = $pdo->prepare("
-                INSERT INTO uploaded_files (storage_key, folder_name, original_name, mime_type, file_size, content_blob)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ");
-            
-            // Use bindValue for all parameters to ensure proper data handling
-            // For LOB, we pass the binary string directly rather than using PARAM_LOB
-            $stmt->bindValue(1, $storageKey, PDO::PARAM_STR);
-            $stmt->bindValue(2, $folder !== '' ? $folder : null, PDO::PARAM_STR);
-            $stmt->bindValue(3, $safeFilename, PDO::PARAM_STR);
-            $stmt->bindValue(4, $mimeType, PDO::PARAM_STR);
-            $stmt->bindValue(5, $fileSize, PDO::PARAM_INT);
-            $stmt->bindValue(6, $blobContents, PDO::PARAM_STR); // Bind as string, not LOB
-            
-            $result = $stmt->execute();
+            // Postgres rejects arbitrary binary bytes when they're sent as plain strings.
+            // Store bytea values via hex decoding so PDF uploads work reliably in production.
+            $result = insertStoredBlobRecord(
+                $pdo,
+                $storageKey,
+                $folder !== '' ? $folder : null,
+                $safeFilename,
+                $mimeType,
+                $fileSize,
+                $blobContents
+            );
             
             if (!$result) {
-                $errorInfo = $stmt->errorInfo();
+                $errorInfo = $pdo->errorInfo();
                 error_log("Database insert failed for file '{$originalName}': " . json_encode($errorInfo));
                 return ['success' => false, 'error' => "Failed to store file in database."];
             }
@@ -344,7 +386,7 @@ if (!function_exists('storeExistingFileFromDisk')) {
         }
 
         $fileSize = (int) filesize($absolutePath);
-        $safeFilename = preg_replace('/[^A-Za-z0-9.\-]/', '_', basename($originalName !== '' ? $originalName : $absolutePath));
+        $safeFilename = storageSanitizeFilename($originalName !== '' ? $originalName : $absolutePath);
         $folder = trim(str_replace('\\', '/', $folder), '/');
         $mimeType = function_exists('mime_content_type')
             ? (mime_content_type($absolutePath) ?: 'application/octet-stream')
@@ -363,21 +405,18 @@ if (!function_exists('storeExistingFileFromDisk')) {
                 return ['success' => false, 'error' => "File '{$absolutePath}' is empty."];
             }
 
-            $stmt = $pdo->prepare("
-                INSERT INTO uploaded_files (storage_key, folder_name, original_name, mime_type, file_size, content_blob)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ");
-            $stmt->bindValue(1, $storageKey, PDO::PARAM_STR);
-            $stmt->bindValue(2, $folder !== '' ? $folder : null, PDO::PARAM_STR);
-            $stmt->bindValue(3, $safeFilename, PDO::PARAM_STR);
-            $stmt->bindValue(4, $mimeType, PDO::PARAM_STR);
-            $stmt->bindValue(5, $fileSize, PDO::PARAM_INT);
-            $stmt->bindValue(6, $blobContents, PDO::PARAM_STR); // Bind as string, not LOB
-            
-            $result = $stmt->execute();
+            $result = insertStoredBlobRecord(
+                $pdo,
+                $storageKey,
+                $folder !== '' ? $folder : null,
+                $safeFilename,
+                $mimeType,
+                $fileSize,
+                $blobContents
+            );
             
             if (!$result) {
-                $errorInfo = $stmt->errorInfo();
+                $errorInfo = $pdo->errorInfo();
                 error_log("Database insert failed for file '{$absolutePath}': " . json_encode($errorInfo));
                 return ['success' => false, 'error' => "Failed to store file in database."];
             }
