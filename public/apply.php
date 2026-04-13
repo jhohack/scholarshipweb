@@ -1,5 +1,33 @@
 <?php
+// Set proper execution timeout and memory limits for large uploads
+set_time_limit(55); // Slightly less than Vercel's 60-second limit
+ini_set('max_execution_time', 55);
+ini_set('memory_limit', '256M');
+
 ob_start();
+
+// Global error and exception handler for Vercel compatibility
+set_error_handler(function($errno, $errstr, $errfile, $errline) {
+    if ($errno === E_WARNING || $errno === E_NOTICE) {
+        error_log("PHP Warning/Notice: [$errno] $errstr in $errfile:$errline");
+        return true; // Suppress warnings
+    }
+    return false;
+});
+
+set_exception_handler(function(Throwable $e) {
+    error_log("Uncaught Exception: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
+    http_response_code(500);
+    ob_end_clean();
+    echo '<div style="font-family: sans-serif; text-align: center; padding: 50px; color: #333;">';
+    echo '<h1>Application Submission Error</h1>';
+    echo '<p>Something went wrong while processing your application.</p>';
+    echo '<p style="color: #666; font-size: 14px;">Please refresh the page and try again.</p>';
+    echo '<a href="/public/scholarships.php" style="color: #0066cc;">Back to Scholarships</a>';
+    echo '</div>';
+    exit;
+});
+
 $base_path = dirname(__DIR__);
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/db.php';
@@ -794,10 +822,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 
             } catch (PDOException $e) {
                 if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
+                    try {
+                        $pdo->rollBack();
+                    } catch (Exception $rollbackError) {
+                        error_log("Rollback failed: " . $rollbackError->getMessage());
+                    }
                 }
-                $errors[] = "Database Error: " . $e->getMessage();
-                error_log("Application submission error: " . $e->getMessage());
+                $errorMsg = $e->getMessage();
+                if (stripos($errorMsg, 'timeout') !== false || stripos($errorMsg, 'gone away') !== false) {
+                    $errors[] = "The connection to the database was lost during submission. Please try again.";
+                } else {
+                    $errors[] = "Database Error: " . substr($errorMsg, 0, 100);
+                }
+                error_log("Application submission error: " . $errorMsg);
             }
 
             if (empty($errors)) {
