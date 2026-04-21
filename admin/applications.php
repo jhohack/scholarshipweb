@@ -118,6 +118,7 @@ function buildApplicationsReturnUrl(array $params = []): string
 
 dbEnsureNotificationsTable($pdo);
 dbEnsureApplicationsSchema($pdo);
+dbEnsureDocumentReviewSchema($pdo);
 
 // Sync Data: Automatically parse year_program into new columns if they are empty
 // This ensures existing data is split correctly based on specific programs and year levels
@@ -226,6 +227,15 @@ if ($action === 'get_details' && isset($_GET['app_id'])) {
         }
         unset($document);
 
+        $stmt = $pdo->prepare("
+            SELECT rr.id as request_id, rr.document_id, rr.note, rr.status, rr.created_at, rr.resolved_at
+            FROM application_reupload_requests rr
+            WHERE rr.application_id = ? AND rr.status = 'pending'
+            ORDER BY rr.created_at DESC, rr.id DESC
+        ");
+        $stmt->execute([$app_id]);
+        $reupload_requests = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
         // 4. Exam Results
         $stmt = $pdo->prepare("
             SELECT id, score, total_items, status 
@@ -240,6 +250,7 @@ if ($action === 'get_details' && isset($_GET['app_id'])) {
             'application' => $app,
             'responses' => $responses,
             'documents' => $documents,
+            'reupload_requests' => $reupload_requests,
             'exam' => $exam
         ]);
     } catch (Throwable $e) {
@@ -279,6 +290,135 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['replace_missing_docum
     }
 
     header("Location: " . buildApplicationsReturnUrl(array_merge($_GET, $_POST)));
+    exit();
+}
+
+// --- Handle Re-upload Requests (POST) ---
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['request_reupload_documents'])) {
+    $app_id = filter_input(INPUT_POST, 'application_id', FILTER_SANITIZE_NUMBER_INT);
+    $scholarship_id_redirect = filter_input(INPUT_POST, 'scholarship_id', FILTER_SANITIZE_NUMBER_INT);
+    $document_ids = $_POST['document_ids'] ?? [];
+    $request_note = trim($_POST['reupload_note'] ?? '');
+    $returnUrl = buildApplicationsReturnUrl(array_merge($_GET, $_POST));
+    $admin_id = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
+
+    if (!validate_csrf_token($_POST['csrf_token'] ?? '')) {
+        $errorMessage = 'Your session expired. Please refresh the page and try again.';
+        if ($isJsonRequest) {
+            respondWithJson(['error' => $errorMessage], 400);
+        }
+        flashMessage($errorMessage, 'danger');
+        header("Location: " . $returnUrl);
+        exit();
+    }
+
+    if (!$app_id || empty($document_ids) || !is_array($document_ids)) {
+        $errorMessage = 'Please select at least one document to request for re-upload.';
+        if ($isJsonRequest) {
+            respondWithJson(['error' => $errorMessage], 400);
+        }
+        flashMessage($errorMessage, 'danger');
+        header("Location: " . $returnUrl);
+        exit();
+    }
+
+    $document_ids = array_values(array_unique(array_filter(array_map('intval', $document_ids))));
+    if (empty($document_ids)) {
+        $errorMessage = 'Please select at least one document to request for re-upload.';
+        if ($isJsonRequest) {
+            respondWithJson(['error' => $errorMessage], 400);
+        }
+        flashMessage($errorMessage, 'danger');
+        header("Location: " . $returnUrl);
+        exit();
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        $stmt_app = $pdo->prepare("
+            SELECT a.id, a.student_id, a.status, s.student_name, s.email, sch.name as scholarship_name
+            FROM applications a
+            JOIN students s ON a.student_id = s.id
+            JOIN scholarships sch ON a.scholarship_id = sch.id
+            WHERE a.id = ?
+            LIMIT 1
+        ");
+        $stmt_app->execute([$app_id]);
+        $app_info = $stmt_app->fetch(PDO::FETCH_ASSOC);
+
+        if (!$app_info) {
+            throw new Exception('Application not found.');
+        }
+
+        $stmt_docs = $pdo->prepare("SELECT id, file_name FROM documents WHERE application_id = ? AND id = ?");
+        $stmt_cancel = $pdo->prepare("UPDATE application_reupload_requests SET status = 'cancelled', resolved_at = CURRENT_TIMESTAMP WHERE application_id = ? AND document_id = ? AND status = 'pending'");
+        $stmt_insert = $pdo->prepare("
+            INSERT INTO application_reupload_requests (application_id, document_id, admin_id, note, status, created_at)
+            VALUES (?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+        ");
+
+        $created_requests = [];
+        foreach ($document_ids as $document_id) {
+            $stmt_docs->execute([$app_id, $document_id]);
+            $document = $stmt_docs->fetch(PDO::FETCH_ASSOC);
+            if (!$document) {
+                continue;
+            }
+
+            $stmt_cancel->execute([$app_id, $document_id]);
+            $stmt_insert->execute([
+                $app_id,
+                $document_id,
+                $admin_id,
+                $request_note !== '' ? $request_note : null,
+            ]);
+            $created_requests[] = trim((string) ($document['file_name'] ?? 'Document'));
+        }
+
+        if (empty($created_requests)) {
+            throw new Exception('No valid documents were selected for re-upload.');
+        }
+
+        $update_status = $pdo->prepare("UPDATE applications SET status = 'Under Review', updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+        $update_status->execute([$app_id]);
+
+        try {
+            $notif_title = "Re-upload Requested";
+            $notif_message = "Your scholarship application for " . $app_info['scholarship_name'] . " needs updated document(s): " . implode(', ', $created_requests) . ".";
+            if ($request_note !== '') {
+                $notif_message .= " Note: " . $request_note;
+            }
+            $stmt_notif = $pdo->prepare("INSERT INTO notifications (student_id, title, message) VALUES (?, ?, ?)");
+            $stmt_notif->execute([$app_info['student_id'], $notif_title, $notif_message]);
+        } catch (PDOException $e) {
+            error_log("Re-upload notif error: " . $e->getMessage());
+        }
+
+        $pdo->commit();
+
+        $successMessage = 'Re-upload request sent. The student will see the action on their portal.';
+        if ($isJsonRequest) {
+            respondWithJson([
+                'success' => true,
+                'message' => $successMessage,
+                'application_id' => $app_id,
+                'documents' => $created_requests,
+            ]);
+        }
+        flashMessage($successMessage);
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $errorMessage = "Unable to send the re-upload request: " . $e->getMessage();
+        if ($isJsonRequest) {
+            respondWithJson(['error' => $errorMessage], 400);
+        }
+        flashMessage($errorMessage, 'danger');
+    }
+
+    header("Location: " . $returnUrl);
     exit();
 }
 
@@ -1665,6 +1805,16 @@ displayFlashMessages();
 const availablePrograms = <?php echo json_encode($distinct_programs ?? []); ?>;
 const availableYearLevels = <?php echo json_encode($distinct_year_levels ?? []); ?>;
 const isAdminUser = <?php echo isAdmin() ? 'true' : 'false'; ?>;
+const applicationsReturnUrl = <?php echo json_encode(buildApplicationsReturnUrl([
+    'scholarship_id' => $scholarship_id,
+    'search' => $search,
+    'start_date' => $start_date,
+    'status_filter' => $status_filter,
+    'program_filter' => $program_filter,
+    'year_level_filter' => $year_level_filter,
+    'page' => $page,
+])); ?>;
+const csrfToken = <?php echo json_encode($csrf_token); ?>;
 let applicationsAlertTimer = null;
 
 function escapeHtml(value) {
@@ -2230,7 +2380,49 @@ function viewApplicant(appId) {
             document.getElementById('responses-content').innerHTML = respHtml;
 
             // Documents
+            const openRequestMap = {};
+            (data.reupload_requests || []).forEach(req => {
+                openRequestMap[Number(req.document_id || 0)] = req;
+            });
+
             let docHtml = '';
+            if (isAdminUser && data.documents.length > 0) {
+                const requestableDocs = data.documents.filter(d => !openRequestMap[Number(d.id || 0)]);
+                docHtml += `
+                    <div class="col-12">
+                        <form method="POST" action="${escapeHtml(applicationsReturnUrl)}" class="p-3 border rounded-3 bg-light mb-3">
+                            <input type="hidden" name="request_reupload_documents" value="1">
+                            <input type="hidden" name="csrf_token" value="${escapeHtml(csrfToken)}">
+                            <input type="hidden" name="scholarship_id" value="${Number(app.scholarship_id || 0)}">
+                            <input type="hidden" name="application_id" value="${Number(app.id || 0)}">
+                            <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>Request re-upload</div>
+                            <div class="text-muted small mb-3">Select the file or files that need correction. The student will see a focused upload screen for only those documents.</div>
+                            <div class="row g-2 mb-3">
+                                ${requestableDocs.length > 0 ? requestableDocs.map(d => `
+                                    <div class="col-md-6">
+                                        <label class="form-check border rounded-3 p-3 h-100 d-block bg-white">
+                                            <input class="form-check-input me-2" type="checkbox" name="document_ids[]" value="${Number(d.id || 0)}">
+                                            <span class="fw-semibold d-block">${escapeHtml(d.file_name || 'Document')}</span>
+                                            <small class="text-muted">Mark this file for student re-upload.</small>
+                                        </label>
+                                    </div>
+                                `).join('') : '<div class="col-12"><div class="alert alert-info mb-0">Every document already has an open re-upload request.</div></div>'}
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Request note</label>
+                                <textarea class="form-control" name="reupload_note" rows="3" placeholder="Tell the student what needs to be fixed..."></textarea>
+                            </div>
+                            <div class="d-flex flex-wrap gap-2 align-items-center">
+                                <button type="submit" class="btn btn-warning fw-bold">
+                                    <i class="bi bi-send me-1"></i> Send Re-upload Request
+                                </button>
+                                <small class="text-muted">This keeps the application under review and only asks for the selected file(s).</small>
+                            </div>
+                        </form>
+                    </div>
+                `;
+            }
+
             if(data.documents.length > 0) {
                 data.documents.forEach(d => {
                     const fileUrl = d.file_url || '#';
@@ -2240,29 +2432,40 @@ function viewApplicant(appId) {
                     const unavailableNote = d.file_status === 'legacy_upload_missing'
                         ? 'Legacy file missing from current storage.'
                         : 'File is unavailable.';
+                    const openRequest = openRequestMap[Number(d.id || 0)] || null;
                     docHtml += `
                         <div class="col-md-6">
-                            <div class="card h-100">
+                            <div class="card h-100 ${openRequest ? 'border-warning shadow-sm' : ''}">
                                 <div class="card-body d-flex align-items-start">
                                     <i class="bi bi-file-earmark-pdf fs-2 text-danger me-3"></i>
                                     <div class="flex-grow-1">
-                                        ${d.file_exists
-                                            ? `<button type="button" class="btn btn-link p-0 text-start text-decoration-none fw-bold stretched-link document-preview-btn" data-url="${encodedUrl}" data-title="${encodedTitle}">${escapeHtml(fileName)}</button>`
-                                            : `<div class="fw-bold text-muted">${escapeHtml(fileName)}</div>
-                                               <small class="text-warning d-block">${escapeHtml(unavailableNote)}</small>
-                                               ${d.can_replace_missing && isAdminUser
-                                                    ? `<button type="button" class="btn btn-sm btn-outline-primary mt-2 document-replace-btn" data-document-id="${Number(d.id || 0)}">
-                                                            <i class="bi bi-upload me-1"></i>Upload Replacement PDF
-                                                       </button>`
-                                                    : ''}`
-                                        }
+                                        <div class="d-flex align-items-start justify-content-between gap-2">
+                                            <div class="flex-grow-1">
+                                                ${d.file_exists
+                                                    ? `<button type="button" class="btn btn-link p-0 text-start text-decoration-none fw-bold stretched-link document-preview-btn" data-url="${encodedUrl}" data-title="${encodedTitle}">${escapeHtml(fileName)}</button>`
+                                                    : `<div class="fw-bold text-muted">${escapeHtml(fileName)}</div>
+                                                       <small class="text-warning d-block">${escapeHtml(unavailableNote)}</small>
+                                                       ${d.can_replace_missing && isAdminUser
+                                                            ? `<button type="button" class="btn btn-sm btn-outline-primary mt-2 document-replace-btn" data-document-id="${Number(d.id || 0)}">
+                                                                    <i class="bi bi-upload me-1"></i>Upload Replacement PDF
+                                                               </button>`
+                                                            : ''}`
+                                                }
+                                            </div>
+                                            ${openRequest ? `<span class="badge bg-warning text-dark">Re-upload requested</span>` : ''}
+                                        </div>
+                                        ${openRequest ? `
+                                            <div class="small text-warning fw-semibold mt-2">
+                                                <i class="bi bi-chat-square-text me-1"></i>${escapeHtml(openRequest.note || 'Please re-upload this document.')}
+                                            </div>
+                                        ` : ''}
                                     </div>
                                 </div>
                             </div>
                         </div>`;
                 });
             } else {
-                docHtml = '<p class="text-muted">No documents uploaded.</p>';
+                docHtml += '<p class="text-muted">No documents uploaded.</p>';
             }
             document.getElementById('documents-content').innerHTML = docHtml;
             bindDocumentPreviewButtons();

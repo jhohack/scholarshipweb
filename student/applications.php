@@ -29,7 +29,7 @@ try {
     if ($student) {
         $student_id = $student['id'];
         $stmt = $pdo->prepare("
-            SELECT s.name AS scholarship_name, a.status, a.submitted_at 
+            SELECT a.id, s.name AS scholarship_name, a.status, a.submitted_at, a.updated_at
             FROM applications a 
             JOIN scholarships s ON a.scholarship_id = s.id 
             WHERE a.student_id = ? 
@@ -39,6 +39,12 @@ try {
         $applications = $stmt->fetchAll();
     } else {
         $applications = [];
+    }
+
+    $open_reupload_requests = $student_id ? getOpenDocumentReuploadRequests($pdo, (int) $student_id) : [];
+    $reupload_request_map = [];
+    foreach ($open_reupload_requests as $request_group) {
+        $reupload_request_map[(int) ($request_group['application_id'] ?? 0)] = $request_group;
     }
 } catch (PDOException $e) {
     $applications = [];
@@ -60,6 +66,25 @@ include 'header.php';
         <h3 class="mb-0">Application History</h3>
         <span class="badge bg-primary-soft text-primary fs-6 rounded-pill"><?php echo count($applications); ?> Applications</span>
     </div>
+    <?php if (!empty($open_reupload_requests)): ?>
+        <?php $primary_request = $open_reupload_requests[0]; ?>
+        <div class="alert alert-warning border-warning shadow-sm d-flex align-items-start gap-3">
+            <div class="fs-3 lh-1"><i class="bi bi-exclamation-triangle-fill"></i></div>
+            <div class="flex-grow-1">
+                <div class="fw-bold mb-1">Action Required</div>
+                <div class="mb-2">
+                    <?php echo htmlspecialchars($primary_request['scholarship_name'] ?? 'Your application'); ?> needs <?php echo (int) ($primary_request['count'] ?? 0); ?> file<?php echo ((int) ($primary_request['count'] ?? 0) === 1) ? '' : 's'; ?> re-uploaded.
+                </div>
+                <div class="small text-dark mb-2">Only upload the files listed by the admin. You do not need to submit the whole application again.</div>
+                <?php if (!empty($primary_request['note'])): ?>
+                    <div class="small text-dark mb-2"><strong>Note:</strong> <?php echo htmlspecialchars($primary_request['note']); ?></div>
+                <?php endif; ?>
+                <a href="reupload-document.php?application_id=<?php echo (int) ($primary_request['application_id'] ?? 0); ?>" class="btn btn-warning fw-bold">
+                    <i class="bi bi-upload me-2"></i>Re-upload files
+                </a>
+            </div>
+        </div>
+    <?php endif; ?>
     <div class="table-responsive">
         <?php if (empty($applications)): ?>
             <div class="text-center py-5">
@@ -75,11 +100,13 @@ include 'header.php';
                         <th>Scholarship Name</th>
                         <th>Submitted On</th>
                         <th class="text-center">Status</th>
+                        <th class="text-center">Action</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($applications as $application): ?>
-                        <tr>
+                        <?php $reupload_request = $reupload_request_map[(int) $application['id']] ?? null; ?>
+                        <tr class="<?php echo $reupload_request ? 'table-warning-subtle' : ''; ?>">
                             <?php
                             // Standardize the status display for the user using the global function
                             $display_status = formatApplicationStatus($application['status']);
@@ -114,6 +141,21 @@ include 'header.php';
                             <td class="text-muted"><?php echo htmlspecialchars(date('F j, Y', strtotime($application['submitted_at']))); ?></td>
                             <td class="text-center">
                                 <span class="badge <?php echo $badge_bg; ?>"><i class="bi <?php echo $icon_class; ?> me-1"></i><?php echo htmlspecialchars($display_status); ?></span>
+                                <?php if ($reupload_request): ?>
+                                    <div class="mt-2">
+                                        <span class="badge bg-warning text-dark">Action Required</span>
+                                    </div>
+                                <?php endif; ?>
+                            </td>
+                            <td class="text-center">
+                                <?php if ($reupload_request): ?>
+                                    <a href="reupload-document.php?application_id=<?php echo (int) $application['id']; ?>" class="btn btn-sm btn-warning fw-bold">
+                                        <i class="bi bi-upload me-1"></i> Re-upload
+                                    </a>
+                                    <div class="small text-muted mt-2"><?php echo (int) ($reupload_request['count'] ?? 0); ?> file<?php echo ((int) ($reupload_request['count'] ?? 0) === 1) ? '' : 's'; ?> needed</div>
+                                <?php else: ?>
+                                    <span class="text-muted">-</span>
+                                <?php endif; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>

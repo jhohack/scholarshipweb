@@ -183,6 +183,79 @@ if (!function_exists('storedFileExists')) {
     }
 }
 
+if (!function_exists('replaceApplicationDocument')) {
+    function replaceApplicationDocument(PDO $pdo, int $documentId, array $file, ?int $expectedUserId = null, ?int $expectedApplicationId = null, ?string $basePath = null): array
+    {
+        $stmt = $pdo->prepare("
+            SELECT id, user_id, application_id, file_name, file_path
+            FROM documents
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$documentId]);
+        $document = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$document) {
+            return ['success' => false, 'error' => 'Document record not found.'];
+        }
+
+        if ($expectedUserId !== null && (int) ($document['user_id'] ?? 0) !== $expectedUserId) {
+            return ['success' => false, 'error' => 'You are not allowed to replace this document.'];
+        }
+
+        if ($expectedApplicationId !== null && (int) ($document['application_id'] ?? 0) !== $expectedApplicationId) {
+            return ['success' => false, 'error' => 'This document does not belong to the selected application.'];
+        }
+
+        $ownerId = (int) ($expectedUserId ?? ($document['user_id'] ?? 0));
+        $namePrefix = $ownerId > 0 ? 'doc_' . $ownerId . '_' : 'doc_' . $documentId . '_';
+        $oldPath = $document['file_path'] ?? '';
+
+        $uploadResult = storeUploadedFile(
+            $pdo,
+            $file,
+            'documents',
+            $namePrefix,
+            ['application/pdf'],
+            appUploadMaxBytes(),
+            $basePath
+        );
+
+        if (!$uploadResult['success']) {
+            return $uploadResult;
+        }
+
+        try {
+            $updateStmt = $pdo->prepare("
+                UPDATE documents
+                SET file_name = ?, file_path = ?, uploaded_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ");
+            $updateStmt->execute([
+                $uploadResult['name'],
+                $uploadResult['path'],
+                $documentId,
+            ]);
+        } catch (Throwable $e) {
+            deleteStoredFileByPath($pdo, $uploadResult['path'] ?? '', $basePath);
+            return ['success' => false, 'error' => 'Failed to update the document record: ' . $e->getMessage()];
+        }
+
+        if ($oldPath !== '' && $oldPath !== ($uploadResult['path'] ?? '')) {
+            deleteStoredFileByPath($pdo, $oldPath, $basePath);
+        }
+
+        return [
+            'success' => true,
+            'document_id' => $documentId,
+            'name' => $uploadResult['name'],
+            'path' => $uploadResult['path'],
+            'previous_name' => $document['file_name'] ?? '',
+            'previous_path' => $oldPath,
+        ];
+    }
+}
+
 if (!function_exists('describeStoredFile')) {
     function describeStoredFile(PDO $pdo, ?string $path, ?string $basePath = null, ?string $fallbackUrl = null): array
     {
@@ -264,46 +337,7 @@ if (!function_exists('replaceLegacyMissingDocument')) {
             return ['success' => false, 'error' => 'Only missing legacy documents can be replaced from this screen.'];
         }
 
-        $ownerId = (int) ($expectedUserId ?? ($document['user_id'] ?? 0));
-        $namePrefix = $ownerId > 0 ? 'doc_' . $ownerId . '_' : 'doc_' . $documentId . '_';
-
-        $uploadResult = storeUploadedFile(
-            $pdo,
-            $file,
-            'documents',
-            $namePrefix,
-            ['application/pdf'],
-            appUploadMaxBytes(),
-            $basePath
-        );
-
-        if (!$uploadResult['success']) {
-            return $uploadResult;
-        }
-
-        try {
-            $updateStmt = $pdo->prepare("
-                UPDATE documents
-                SET file_name = ?, file_path = ?, uploaded_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            ");
-            $updateStmt->execute([
-                $uploadResult['name'],
-                $uploadResult['path'],
-                $documentId,
-            ]);
-        } catch (Throwable $e) {
-            deleteStoredFileByPath($pdo, $uploadResult['path'] ?? '', $basePath);
-            return ['success' => false, 'error' => 'Failed to update the document record: ' . $e->getMessage()];
-        }
-
-        return [
-            'success' => true,
-            'document_id' => $documentId,
-            'name' => $uploadResult['name'],
-            'path' => $uploadResult['path'],
-            'previous_name' => $document['file_name'] ?? '',
-        ];
+        return replaceApplicationDocument($pdo, $documentId, $file, $expectedUserId, $expectedApplicationId, $basePath);
     }
 }
 

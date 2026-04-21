@@ -23,6 +23,7 @@ $recent_applications = [];
 $active_scholarship = null;
 $drop_request_status = null;
 $pending_exam_application = null;
+$open_reupload_requests = [];
 $student_id = null;
 
 try {
@@ -102,6 +103,8 @@ try {
         ");
         $app_stmt->execute([$student_id]);
         $recent_applications = $app_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $open_reupload_requests = getOpenDocumentReuploadRequests($pdo, (int) $student_id);
     }
 } catch (PDOException $e) {
     // In a real app, you would log this error and potentially show a user-friendly error message.
@@ -193,6 +196,22 @@ displayFlashMessages();
     <div class="col-lg-4">
         <div class="content-block h-100" data-aos="fade-up" data-aos-delay="300">
             <h3>Quick Actions</h3>
+            <?php if (!empty($open_reupload_requests)): ?>
+                <?php $dashboard_request = $open_reupload_requests[0]; ?>
+                <div class="alert alert-warning border-warning shadow-sm">
+                    <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>Action Required</div>
+                    <div class="small mb-2">
+                        <?php echo htmlspecialchars($dashboard_request['scholarship_name'] ?? 'Your application'); ?> needs <?php echo (int) ($dashboard_request['count'] ?? 0); ?> file<?php echo ((int) ($dashboard_request['count'] ?? 0) === 1) ? '' : 's'; ?> re-uploaded.
+                    </div>
+                    <div class="small text-dark mb-3">Only upload the requested files. Your other application details stay as they are.</div>
+                    <?php if (!empty($dashboard_request['note'])): ?>
+                        <div class="small text-dark mb-3"><strong>Note:</strong> <?php echo htmlspecialchars($dashboard_request['note']); ?></div>
+                    <?php endif; ?>
+                    <a href="reupload-document.php?application_id=<?php echo (int) ($dashboard_request['application_id'] ?? 0); ?>" class="btn btn-warning btn-sm fw-bold">
+                        <i class="bi bi-upload me-1"></i> Re-upload files
+                    </a>
+                </div>
+            <?php endif; ?>
             <div class="mb-3">
                 <h6 class="text-muted mb-2"><i class="bi bi-play-btn-fill me-2"></i>System Tutorial</h6>
                 <div class="ratio ratio-16x9 rounded overflow-hidden shadow-sm bg-dark">

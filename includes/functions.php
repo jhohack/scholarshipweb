@@ -94,9 +94,32 @@ function getUserRole() {
  * Flash a message to the session for one-time display.
  *
  * @param string $message
+ * @param string $type Bootstrap alert type, e.g. success, danger, warning, info
  */
-function flashMessage($message) {
+function flashMessage($message, $type = 'success') {
     $_SESSION['flash_message'] = $message;
+    $_SESSION['flash_type'] = $type;
+}
+
+/**
+ * Retrieve and clear the flash message payload.
+ *
+ * @return array{message:string,type:string}|null
+ */
+function getFlashMessageData() {
+    if (!isset($_SESSION['flash_message'])) {
+        return null;
+    }
+
+    $message = $_SESSION['flash_message'];
+    $type = $_SESSION['flash_type'] ?? 'success';
+
+    unset($_SESSION['flash_message'], $_SESSION['flash_type']);
+
+    return [
+        'message' => is_string($message) ? $message : (string) $message,
+        'type' => is_string($type) && $type !== '' ? $type : 'success',
+    ];
 }
 
 /**
@@ -105,12 +128,8 @@ function flashMessage($message) {
  * @return string|null
  */
 function getFlashMessage() {
-    if (isset($_SESSION['flash_message'])) {
-        $message = $_SESSION['flash_message'];
-        unset($_SESSION['flash_message']);
-        return $message;
-    }
-    return null;
+    $flash = getFlashMessageData();
+    return $flash['message'] ?? null;
 }
 
 /**
@@ -189,10 +208,20 @@ function generatePagination($current_page, $total_pages, $params = []) {
  * This centralizes the flash message display logic.
  */
 function displayFlashMessages() {
-    $message = getFlashMessage();
-    if ($message) {
-        echo '<div class="alert alert-success alert-dismissible fade show" role="alert" data-aos="fade-up">' . htmlspecialchars($message) . '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button></div>';
+    $flash = getFlashMessageData();
+    if (!$flash) {
+        return;
     }
+
+    $type = $flash['type'] ?? 'success';
+    $validTypes = ['success', 'danger', 'warning', 'info', 'primary', 'secondary', 'light', 'dark'];
+    if (!in_array($type, $validTypes, true)) {
+        $type = 'success';
+    }
+
+    echo '<div class="alert alert-' . htmlspecialchars($type, ENT_QUOTES, 'UTF-8') . ' alert-dismissible fade show" role="alert" data-aos="fade-up">'
+        . htmlspecialchars($flash['message'] ?? '', ENT_QUOTES, 'UTF-8')
+        . '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button></div>';
 }
 
 /**
@@ -223,6 +252,103 @@ function getStudentApplications($pdo, $user_id) {
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$student_id]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Retrieves open document re-upload requests for a student or a single application.
+ *
+ * @param PDO $pdo
+ * @param int|null $student_id
+ * @param int|null $application_id
+ * @return array
+ */
+function getOpenDocumentReuploadRequests(PDO $pdo, ?int $student_id = null, ?int $application_id = null): array
+{
+    if (function_exists('dbEnsureDocumentReviewSchema')) {
+        dbEnsureDocumentReviewSchema($pdo);
+    }
+
+    $where = ["rr.status = 'pending'"];
+    $params = [];
+
+    if ($student_id !== null) {
+        $where[] = 'a.student_id = ?';
+        $params[] = $student_id;
+    }
+
+    if ($application_id !== null) {
+        $where[] = 'a.id = ?';
+        $params[] = $application_id;
+    }
+
+    $sql = "
+        SELECT
+            rr.id as request_id,
+            rr.application_id,
+            rr.document_id,
+            rr.note,
+            rr.status as request_status,
+            rr.created_at,
+            rr.resolved_at,
+            a.status as application_status,
+            a.updated_at as application_updated_at,
+            s.name as scholarship_name,
+            d.file_name,
+            d.file_path
+        FROM application_reupload_requests rr
+        JOIN applications a ON rr.application_id = a.id
+        JOIN scholarships s ON a.scholarship_id = s.id
+        JOIN documents d ON rr.document_id = d.id
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY rr.created_at DESC, rr.id DESC
+    ";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if (!$rows) {
+        return [];
+    }
+
+    $grouped = [];
+    foreach ($rows as $row) {
+        $appId = (int) ($row['application_id'] ?? 0);
+        if ($appId <= 0) {
+            continue;
+        }
+
+        if (!isset($grouped[$appId])) {
+            $grouped[$appId] = [
+                'application_id' => $appId,
+                'scholarship_name' => $row['scholarship_name'] ?? '',
+                'application_status' => $row['application_status'] ?? '',
+                'application_updated_at' => $row['application_updated_at'] ?? null,
+                'note' => '',
+                'count' => 0,
+                'created_at' => $row['created_at'] ?? null,
+                'documents' => [],
+            ];
+        }
+
+        $note = trim((string) ($row['note'] ?? ''));
+        if ($grouped[$appId]['note'] === '' && $note !== '') {
+            $grouped[$appId]['note'] = $note;
+        }
+
+        $grouped[$appId]['count']++;
+        $grouped[$appId]['documents'][] = [
+            'request_id' => (int) ($row['request_id'] ?? 0),
+            'document_id' => (int) ($row['document_id'] ?? 0),
+            'document_name' => trim((string) ($row['file_name'] ?? '')) !== '' ? (string) $row['file_name'] : 'Document',
+            'document_path' => $row['file_path'] ?? '',
+            'note' => $note,
+            'created_at' => $row['created_at'] ?? null,
+            'resolved_at' => $row['resolved_at'] ?? null,
+        ];
+    }
+
+    return array_values($grouped);
 }
 
 /**

@@ -1,0 +1,8 @@
+{
+  "name": "scholarshipweb",
+  "private": true,
+  "scripts": {
+    "dev": "set APP_BASE_PATH=/ && C:/xampp/php/php.exe -S 127.0.0.1:8000 dev-router.php",
+    "start": "npm run dev"
+  }
+}
