@@ -71,6 +71,42 @@ function respondWithJson(array $payload, int $statusCode = 200): void {
     exit;
 }
 
+function buildApplicationsReturnUrl(array $params = []): string
+{
+    $allowedKeys = [
+        'scholarship_id',
+        'search',
+        'start_date',
+        'status_filter',
+        'program_filter',
+        'year_level_filter',
+        'page',
+    ];
+
+    $query = [];
+    foreach ($allowedKeys as $key) {
+        if (!array_key_exists($key, $params)) {
+            continue;
+        }
+
+        $value = $params[$key];
+        if ($value === null || $value === '') {
+            continue;
+        }
+
+        if ($key === 'scholarship_id' || $key === 'page') {
+            $value = (int) $value;
+            if ($value <= 0) {
+                continue;
+            }
+        }
+
+        $query[$key] = $value;
+    }
+
+    return 'applications.php' . (!empty($query) ? '?' . http_build_query($query) : '');
+}
+
 dbEnsureNotificationsTable($pdo);
 dbEnsureApplicationsSchema($pdo);
 
@@ -233,7 +269,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['replace_missing_docum
         }
     }
 
-    header("Location: applications.php?scholarship_id=" . $scholarship_id_redirect);
+    header("Location: " . buildApplicationsReturnUrl(array_merge($_GET, $_POST)));
     exit();
 }
 
@@ -333,7 +369,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_details'])) {
         flashMessage("Error updating details: " . $e->getMessage(), 'danger');
     }
     
-    header("Location: applications.php?scholarship_id=" . $scholarship_id_redirect);
+    header("Location: " . buildApplicationsReturnUrl(array_merge($_GET, $_POST)));
     exit();
 }
 
@@ -444,7 +480,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
             flashMessage("Error updating status: " . $e->getMessage(), 'danger');
         }
     }
-    header("Location: applications.php?scholarship_id=" . $scholarship_id_redirect);
+    header("Location: " . buildApplicationsReturnUrl(array_merge($_GET, $_POST)));
     exit();
 }
 
@@ -582,7 +618,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_action'])) {
         }
         flashMessage("$count applications updated to '$bulk_status'.");
     }
-    header("Location: applications.php?scholarship_id=" . $scholarship_id_redirect);
+    header("Location: " . buildApplicationsReturnUrl(array_merge($_GET, $_POST)));
     exit();
 }
 
@@ -1255,7 +1291,15 @@ displayFlashMessages();
 
         <!-- Applicants Table -->
         <?php if (isAdmin()): ?>
-        <form method="POST" id="bulkActionForm">
+        <form method="POST" id="bulkActionForm" action="<?php echo htmlspecialchars(buildApplicationsReturnUrl([
+            'scholarship_id' => $scholarship_id,
+            'search' => $search,
+            'start_date' => $start_date,
+            'status_filter' => $status_filter,
+            'program_filter' => $program_filter,
+            'year_level_filter' => $year_level_filter,
+            'page' => $page,
+        ])); ?>">
         <input type="hidden" name="scholarship_id" value="<?php echo $scholarship_id; ?>">
         <input type="hidden" name="bulk_action" value="1">
         
@@ -1421,7 +1465,15 @@ displayFlashMessages();
                     <!-- Left Column: Details -->
                     <div class="col-lg-8 border-end">
                         <?php if (isAdmin()): ?>
-                        <form action="applications.php" method="POST" id="detailsForm">
+                        <form action="<?php echo htmlspecialchars(buildApplicationsReturnUrl([
+                            'scholarship_id' => $scholarship_id,
+                            'search' => $search,
+                            'start_date' => $start_date,
+                            'status_filter' => $status_filter,
+                            'program_filter' => $program_filter,
+                            'year_level_filter' => $year_level_filter,
+                            'page' => $page,
+                        ])); ?>" method="POST" id="detailsForm">
                         <input type="hidden" name="update_details" value="1">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                         <input type="hidden" name="scholarship_id" value="<?php echo $scholarship_id; ?>">
@@ -1466,7 +1518,15 @@ displayFlashMessages();
                         <div class="p-3 bg-light rounded">
                             <h5 class="fw-bold mb-3">Application Status Control</h5>
                             <?php if (isAdmin()): ?>
-                            <form action="applications.php" method="POST">
+                            <form action="<?php echo htmlspecialchars(buildApplicationsReturnUrl([
+                                'scholarship_id' => $scholarship_id,
+                                'search' => $search,
+                                'start_date' => $start_date,
+                                'status_filter' => $status_filter,
+                                'program_filter' => $program_filter,
+                                'year_level_filter' => $year_level_filter,
+                                'page' => $page,
+                            ])); ?>" method="POST">
                                 <input type="hidden" name="update_status" value="1">
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                                 <input type="hidden" name="scholarship_id" value="<?php echo $scholarship_id; ?>">
@@ -1505,7 +1565,15 @@ displayFlashMessages();
 </div>
 
 <?php if (isAdmin()): ?>
-<form action="applications.php" method="POST" enctype="multipart/form-data" id="replaceMissingDocumentForm" class="d-none">
+<form action="<?php echo htmlspecialchars(buildApplicationsReturnUrl([
+    'scholarship_id' => $scholarship_id,
+    'search' => $search,
+    'start_date' => $start_date,
+    'status_filter' => $status_filter,
+    'program_filter' => $program_filter,
+    'year_level_filter' => $year_level_filter,
+    'page' => $page,
+])); ?>" method="POST" enctype="multipart/form-data" id="replaceMissingDocumentForm" class="d-none">
     <input type="hidden" name="replace_missing_document" value="1">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
     <input type="hidden" name="scholarship_id" value="<?php echo (int) $scholarship_id; ?>">
@@ -1660,13 +1728,46 @@ document.addEventListener('DOMContentLoaded', function() {
     if (replacementForm && replacementInput) {
         replacementInput.addEventListener('change', function() {
             if (replacementInput.files && replacementInput.files.length > 0) {
+                replacementForm.action = buildApplicationsActionUrl();
                 replacementForm.submit();
             }
         });
     }
+
+    const detailsForm = document.getElementById('detailsForm');
+    const statusForm = document.querySelector('#applicantModal .col-lg-4 form');
+    const bulkActionForm = document.getElementById('bulkActionForm');
+
+    [detailsForm, statusForm, bulkActionForm, replacementForm].forEach(form => {
+        if (!form) return;
+        form.addEventListener('submit', function() {
+            this.action = buildApplicationsActionUrl();
+        });
+    });
 });
 
 let currentPage = 1;
+
+function buildApplicationsActionUrl() {
+    const params = new URLSearchParams();
+    const scholarshipId = document.getElementById('scholarshipIdInput')?.value || '';
+    const search = document.getElementById('liveSearchInput')?.value || '';
+    const startDate = document.getElementById('startDateInput')?.value || '';
+    const programFilter = document.getElementById('programFilterInput')?.value || '';
+    const yearLevelFilter = document.getElementById('yearLevelFilterInput')?.value || '';
+    const statusFilter = document.getElementById('statusFilterInput')?.value || '';
+
+    if (scholarshipId) params.set('scholarship_id', scholarshipId);
+    if (search) params.set('search', search);
+    if (startDate) params.set('start_date', startDate);
+    if (statusFilter) params.set('status_filter', statusFilter);
+    if (programFilter) params.set('program_filter', programFilter);
+    if (yearLevelFilter) params.set('year_level_filter', yearLevelFilter);
+    if (currentPage > 0) params.set('page', String(currentPage));
+
+    const query = params.toString();
+    return query ? `applications.php?${query}` : 'applications.php';
+}
 
 async function fetchJsonResponse(url) {
     const response = await fetch(url, {
