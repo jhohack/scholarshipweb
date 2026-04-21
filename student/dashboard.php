@@ -123,6 +123,37 @@ displayFlashMessages();
     </div>
 </div>
 
+<?php if ($active_scholarship && $active_scholarship['status'] === 'Under Review'): ?>
+    <?php $dashboard_review_request = $open_reupload_requests[0] ?? null; ?>
+    <div class="alert <?php echo !empty($dashboard_review_request) ? 'alert-warning border-warning shadow-sm' : 'alert-info border-info shadow-sm'; ?> d-flex align-items-start gap-3 mb-4" data-aos="fade-up">
+        <div class="fs-3 lh-1">
+            <i class="bi <?php echo !empty($dashboard_review_request) ? 'bi-exclamation-triangle-fill' : 'bi-hourglass-split'; ?>"></i>
+        </div>
+        <div class="flex-grow-1">
+            <div class="fw-bold mb-1">
+                <?php echo !empty($dashboard_review_request) ? 'Action Required' : 'Under Review'; ?>
+            </div>
+            <div class="mb-2">
+                <?php if (!empty($dashboard_review_request)): ?>
+                    <?php echo htmlspecialchars($dashboard_review_request['scholarship_name'] ?? 'Your application'); ?> is under review and <?php echo (int) ($dashboard_review_request['count'] ?? 0); ?> file<?php echo ((int) ($dashboard_review_request['count'] ?? 0) === 1) ? '' : 's'; ?> need to be re-uploaded.
+                    Upload only the requested files. You do not need to fill out the application form again.
+                <?php else: ?>
+                    <?php echo htmlspecialchars($active_scholarship['name'] ?? 'Your application'); ?> is currently under review. We will post the next update here.
+                    You do not need to fill out the application form again.
+                <?php endif; ?>
+            </div>
+            <?php if (!empty($dashboard_review_request)): ?>
+                <?php if (!empty($dashboard_review_request['note'])): ?>
+                    <div class="small text-dark mb-3"><strong>Note:</strong> <?php echo htmlspecialchars($dashboard_review_request['note']); ?></div>
+                <?php endif; ?>
+                <a href="reupload-document.php?application_id=<?php echo (int) ($dashboard_review_request['application_id'] ?? 0); ?>" class="btn btn-warning btn-sm fw-bold">
+                    <i class="bi bi-upload me-1"></i> Re-upload files
+                </a>
+            <?php endif; ?>
+        </div>
+    </div>
+<?php endif; ?>
+
 <!-- Recent Applications -->
 <div class="row">
     <div class="col-lg-8">

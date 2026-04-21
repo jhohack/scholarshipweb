@@ -617,7 +617,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
                 // 1. Insert Database Notification
                 try {
                     $notif_title = "Application Status Update";
-                    $notif_msg = "Your application for " . $info['scholarship_name'] . " has been updated to: " . $new_status . ".";
+                    if ($new_status === 'Under Review') {
+                        $notif_msg = "Your application for " . $info['scholarship_name'] . " is now under review.";
+                        $notif_msg .= " Please check your dashboard for any re-upload instructions.";
+                        $notif_msg .= " You do not need to fill out the full application form again.";
+                    } else {
+                        $notif_msg = "Your application for " . $info['scholarship_name'] . " has been updated to: " . $new_status . ".";
+                    }
                     if (!empty($remarks)) $notif_msg .= " Remarks: " . $remarks;
                     
                     $stmt_notif = $pdo->prepare("INSERT INTO notifications (student_id, title, message) VALUES (?, ?, ?)");
@@ -633,7 +639,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
                     $mail->Subject = 'Application Status Update: ' . $info['scholarship_name'];
                     
                     $body = "<p>Dear {$info['student_name']},</p>";
-                    $body .= "<p>Your application for <strong>{$info['scholarship_name']}</strong> has been updated to: <strong style='color: #0d6efd;'>{$new_status}</strong>.</p>";
+                    if ($new_status === 'Under Review') {
+                        $body .= "<p>Your application for <strong>{$info['scholarship_name']}</strong> is now <strong style='color: #0d6efd;'>Under Review</strong>.</p>";
+                        $body .= "<p>Please check your dashboard for any re-upload instructions. You do not need to submit the full application form again.</p>";
+                    } else {
+                        $body .= "<p>Your application for <strong>{$info['scholarship_name']}</strong> has been updated to: <strong style='color: #0d6efd;'>{$new_status}</strong>.</p>";
+                    }
                     if (!empty($remarks)) {
                         $body .= "<p><strong>Remarks:</strong> " . nl2br(htmlspecialchars($remarks)) . "</p>";
                     }
