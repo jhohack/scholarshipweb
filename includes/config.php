@@ -22,6 +22,58 @@ if (!function_exists('env_config')) {
     }
 }
 
+if (!function_exists('loadLocalEnvFile')) {
+    function loadLocalEnvFile(string $path): void
+    {
+        if (!is_file($path) || !is_readable($path)) {
+            return;
+        }
+
+        $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if ($lines === false) {
+            return;
+        }
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '' || strpos($line, '#') === 0 || strpos($line, ';') === 0) {
+                continue;
+            }
+
+            if (strpos($line, 'export ') === 0) {
+                $line = trim(substr($line, 7));
+            }
+
+            $parts = explode('=', $line, 2);
+            if (count($parts) !== 2) {
+                continue;
+            }
+
+            $name = trim($parts[0]);
+            $value = trim($parts[1]);
+
+            if ($name === '' || preg_match('/\s/', $name)) {
+                continue;
+            }
+
+            $valueLength = strlen($value);
+            if ($valueLength >= 2) {
+                $first = $value[0];
+                $last = $value[$valueLength - 1];
+                if (($first === '"' && $last === '"') || ($first === "'" && $last === "'")) {
+                    $value = substr($value, 1, -1);
+                }
+            }
+
+            $_ENV[$name] = $value;
+            $_SERVER[$name] = $value;
+            putenv("{$name}={$value}");
+        }
+    }
+}
+
+loadLocalEnvFile(dirname(__DIR__) . '/.env');
+
 $httpHost = $_SERVER['HTTP_HOST'] ?? '';
 $isLocalHost = $httpHost === '' || strpos($httpHost, 'localhost') === 0 || strpos($httpHost, '127.0.0.1') === 0;
 $requestScheme = (
