@@ -59,8 +59,13 @@ function formatAcademicDisplay(array $application, string $field): string {
 }
 
 function isApplicationsJsonRequest(): bool {
+    $accept = strtolower($_SERVER['HTTP_ACCEPT'] ?? '');
+    $requestedWith = strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '');
+
     return (($_GET['action'] ?? '') === 'get_details' && isset($_GET['app_id']))
-        || isset($_GET['ajax_search']);
+        || isset($_GET['ajax_search'])
+        || str_contains($accept, 'application/json')
+        || $requestedWith === 'xmlhttprequest';
 }
 
 function respondWithJson(array $payload, int $statusCode = 200): void {
@@ -278,6 +283,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_details'])) {
     $app_id = filter_input(INPUT_POST, 'application_id', FILTER_SANITIZE_NUMBER_INT);
     $student_id = filter_input(INPUT_POST, 'student_id', FILTER_SANITIZE_NUMBER_INT);
     $scholarship_id_redirect = $_POST['scholarship_id'];
+    $returnUrl = buildApplicationsReturnUrl(array_merge($_GET, $_POST));
+
+    if (!$app_id || !$student_id) {
+        $errorMessage = 'Missing applicant information.';
+        if ($isJsonRequest) {
+            respondWithJson([
+                'error' => $errorMessage,
+            ], 400);
+        }
+        flashMessage($errorMessage, 'danger');
+        header("Location: " . $returnUrl);
+        exit();
+    }
 
     try {
         $pdo->beginTransaction();
@@ -363,24 +381,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_details'])) {
         }
 
         $pdo->commit();
-        flashMessage("Applicant details updated successfully.");
+        $successMessage = "Applicant details updated successfully.";
+        if ($isJsonRequest) {
+            respondWithJson([
+                'success' => true,
+                'message' => $successMessage,
+                'application_id' => $app_id,
+                'student_id' => $student_id,
+            ]);
+        }
+        flashMessage($successMessage);
     } catch (Exception $e) {
         $pdo->rollBack();
-        flashMessage("Error updating details: " . $e->getMessage(), 'danger');
+        $errorMessage = "Error updating details: " . $e->getMessage();
+        if ($isJsonRequest) {
+            respondWithJson([
+                'error' => $errorMessage,
+            ], 400);
+        }
+        flashMessage($errorMessage, 'danger');
     }
     
-    header("Location: " . buildApplicationsReturnUrl(array_merge($_GET, $_POST)));
+    header("Location: " . $returnUrl);
     exit();
 }
 
 // --- Handle Status Update (POST) ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     $app_id = filter_input(INPUT_POST, 'application_id', FILTER_SANITIZE_NUMBER_INT);
-    $new_status = $_POST['status'];
-    $remarks = trim($_POST['remarks']);
+    $new_status = $_POST['status'] ?? '';
+    $remarks = trim($_POST['remarks'] ?? '');
     $scholarship_percentage = !empty($_POST['scholarship_percentage']) ? $_POST['scholarship_percentage'] : null;
     $scholarship_amount = !empty($_POST['scholarship_amount']) ? $_POST['scholarship_amount'] : null;
     $scholarship_id_redirect = $_POST['scholarship_id'];
+    $returnUrl = buildApplicationsReturnUrl(array_merge($_GET, $_POST));
 
     if ($app_id && $new_status) {
         try {
@@ -475,12 +509,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
                 }
             }
 
-            flashMessage("Application status updated to '$new_status' and email sent.");
+            $successMessage = "Application status updated to '$new_status' and email sent.";
+            if ($isJsonRequest) {
+                respondWithJson([
+                    'success' => true,
+                    'message' => $successMessage,
+                    'application_id' => $app_id,
+                    'status' => $new_status,
+                ]);
+            }
+            flashMessage($successMessage);
         } catch (Exception $e) {
-            flashMessage("Error updating status: " . $e->getMessage(), 'danger');
+            $errorMessage = "Error updating status: " . $e->getMessage();
+            if ($isJsonRequest) {
+                respondWithJson([
+                    'error' => $errorMessage,
+                ], 400);
+            }
+            flashMessage($errorMessage, 'danger');
         }
+    } elseif ($isJsonRequest) {
+        respondWithJson([
+            'error' => 'Missing application status information.',
+        ], 400);
     }
-    header("Location: " . buildApplicationsReturnUrl(array_merge($_GET, $_POST)));
+
+    header("Location: " . $returnUrl);
     exit();
 }
 
@@ -930,6 +984,8 @@ $csrf_token = generate_csrf_token();
 include 'header.php';
 displayFlashMessages();
 ?>
+
+<div id="applicationsActionAlert" class="mb-3"></div>
 
 <style>
     .overview-card .card-body {
@@ -1605,6 +1661,7 @@ displayFlashMessages();
 const availablePrograms = <?php echo json_encode($distinct_programs ?? []); ?>;
 const availableYearLevels = <?php echo json_encode($distinct_year_levels ?? []); ?>;
 const isAdminUser = <?php echo isAdmin() ? 'true' : 'false'; ?>;
+let applicationsAlertTimer = null;
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -1613,6 +1670,28 @@ function escapeHtml(value) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+function showApplicationsAlert(message, type = 'success') {
+    const container = document.getElementById('applicationsActionAlert');
+    if (!container) {
+        return;
+    }
+
+    if (applicationsAlertTimer) {
+        clearTimeout(applicationsAlertTimer);
+    }
+
+    container.innerHTML = `
+        <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+            ${escapeHtml(message)}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    `;
+
+    applicationsAlertTimer = setTimeout(() => {
+        container.innerHTML = '';
+    }, 5000);
 }
 
 function bindDocumentPreviewButtons() {
@@ -1744,6 +1823,24 @@ document.addEventListener('DOMContentLoaded', function() {
             this.action = buildApplicationsActionUrl();
         });
     });
+
+    if (detailsForm) {
+        detailsForm.addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            const submitter = event.submitter || document.activeElement || null;
+            await submitApplicationsMutationForm(this, submitter, 'Applicant details updated successfully.');
+        });
+    }
+
+    if (statusForm) {
+        statusForm.addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            const submitter = event.submitter || document.activeElement || null;
+            await submitApplicationsMutationForm(this, submitter, 'Application status updated successfully.');
+        });
+    }
 });
 
 let currentPage = 1;
@@ -1769,10 +1866,12 @@ function buildApplicationsActionUrl() {
     return query ? `applications.php?${query}` : 'applications.php';
 }
 
-async function fetchJsonResponse(url) {
+async function fetchJsonResponse(url, options = {}) {
     const response = await fetch(url, {
         credentials: 'same-origin',
+        ...options,
         headers: {
+            ...(options.headers || {}),
             'Accept': 'application/json'
         }
     });
@@ -1822,22 +1921,29 @@ function changePage(page) {
 }
 
 function performLiveSearch() {
-    const search = document.getElementById('liveSearchInput').value;
-    const startDate = document.getElementById('startDateInput').value;
-    const program = document.getElementById('programFilterInput').value;
-    const yearLevel = document.getElementById('yearLevelFilterInput').value;
-    const status = document.getElementById('statusFilterInput').value;
-    const scholarshipId = document.getElementById('scholarshipIdInput').value;
+    const tableBody = document.getElementById('applicantsTableBody');
+    const paginationContainer = document.getElementById('paginationContainer');
+    if (!tableBody || !paginationContainer) {
+        return Promise.resolve();
+    }
+
+    const search = document.getElementById('liveSearchInput')?.value || '';
+    const startDate = document.getElementById('startDateInput')?.value || '';
+    const program = document.getElementById('programFilterInput')?.value || '';
+    const yearLevel = document.getElementById('yearLevelFilterInput')?.value || '';
+    const status = document.getElementById('statusFilterInput')?.value || '';
+    const scholarshipId = document.getElementById('scholarshipIdInput')?.value || '';
+    const tableColumnCount = isAdminUser ? 12 : 11;
 
     const url = `applications.php?scholarship_id=${scholarshipId}&ajax_search=1&search=${encodeURIComponent(search)}&start_date=${encodeURIComponent(startDate)}&status_filter=${encodeURIComponent(status)}&program_filter=${encodeURIComponent(program)}&year_level_filter=${encodeURIComponent(yearLevel)}&page=${currentPage}`;
 
     // Show loading spinner
-    document.getElementById('applicantsTableBody').innerHTML = '<tr><td colspan="9" class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></td></tr>';
+    tableBody.innerHTML = `<tr><td colspan="${tableColumnCount}" class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></td></tr>`;
 
-    fetchJsonResponse(url)
+    return fetchJsonResponse(url)
         .then(data => {
-            document.getElementById('applicantsTableBody').innerHTML = data.rows;
-            document.getElementById('paginationContainer').innerHTML = data.pagination;
+            tableBody.innerHTML = data.rows;
+            paginationContainer.innerHTML = data.pagination;
             
             // Update Statistics Cards
             if (data.stats) {
@@ -1849,22 +1955,64 @@ function performLiveSearch() {
                 if(document.getElementById('stat-dropped')) document.getElementById('stat-dropped').textContent = data.stats.Dropped;
             }
             if (data.types) {
-                if(document.getElementById('stat-total')) document.getElementById('stat-total').textContent = data.types.total;
-                if(document.getElementById('stat-new')) document.getElementById('stat-new').textContent = data.types.new_apps;
-                if(document.getElementById('stat-renewal')) document.getElementById('stat-renewal').textContent = data.types.renewal_apps;
+                if (document.getElementById('stat-total')) document.getElementById('stat-total').textContent = data.types.total;
+                if (document.getElementById('stat-new')) document.getElementById('stat-new').textContent = data.types.new_apps;
+                if (document.getElementById('stat-renewal')) document.getElementById('stat-renewal').textContent = data.types.renewal_apps;
             }
         })
         .catch(error => {
             console.error('Error loading applications:', error);
-            const tableBody = document.getElementById('applicantsTableBody');
-            if (tableBody) {
-                tableBody.innerHTML = `<tr><td colspan="12" class="text-center py-4 text-danger">${escapeHtml(error.message || 'Unable to load applications right now.')}</td></tr>`;
-            }
+            tableBody.innerHTML = `<tr><td colspan="12" class="text-center py-4 text-danger">${escapeHtml(error.message || 'Unable to load applications right now.')}</td></tr>`;
 
             if (error.sessionExpired) {
                 window.location.href = 'login.php?timeout=1';
             }
         });
+}
+
+async function submitApplicationsMutationForm(form, submitter, successFallbackMessage) {
+    const modalEl = document.getElementById('applicantModal');
+    const modal = modalEl ? bootstrap.Modal.getOrCreateInstance(modalEl) : null;
+    const formData = new FormData(form);
+
+    if (submitter && submitter.name) {
+        formData.set(submitter.name, submitter.value);
+    }
+
+    const submitButtons = form.querySelectorAll('button[type="submit"], input[type="submit"]');
+    submitButtons.forEach(button => {
+        button.disabled = true;
+    });
+
+    try {
+        const data = await fetchJsonResponse(form.action || buildApplicationsActionUrl(), {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+
+        if (modal) {
+            modal.hide();
+        }
+
+        showApplicationsAlert(data.message || successFallbackMessage, 'success');
+        await performLiveSearch();
+    } catch (error) {
+        console.error('Error saving application changes:', error);
+
+        if (error.sessionExpired) {
+            window.location.href = 'login.php?timeout=1';
+            return;
+        }
+
+        showApplicationsAlert(error.message || 'Unable to save changes right now.', 'danger');
+    } finally {
+        submitButtons.forEach(button => {
+            button.disabled = false;
+        });
+    }
 }
 
 function viewApplicant(appId) {
