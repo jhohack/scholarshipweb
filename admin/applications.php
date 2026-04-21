@@ -2145,7 +2145,7 @@ function viewApplicant(appId) {
             document.getElementById('personal-content').innerHTML = `
                 <table class="table table-borderless">
                     <tr><th width="30%">Name:</th><td><input type="text" class="form-control form-control-sm" name="student_name" value="${app.student_name}"></td></tr>
-                    <tr><th>School ID:</th><td><input type="text" class="form-control form-control-sm" name="school_id_number" value="${app.school_id_number || ''}" placeholder="${app.student_status === 'Incoming Student' ? 'No school ID yet' : ''}"></td></tr>
+                    <tr><th>School ID:</th><td><input type="text" class="form-control form-control-sm" name="school_id_number" value="${app.school_id_number || ''}"></td></tr>
                     <tr><th>Email:</th><td><input type="email" class="form-control form-control-sm" name="email" value="${app.email}"></td></tr>
                     <tr><th>Phone:</th><td><input type="text" class="form-control form-control-sm" name="phone" value="${app.phone || ''}"></td></tr>
                     <tr><th>Birthdate:</th><td><input type="date" class="form-control form-control-sm" name="date_of_birth" value="${app.date_of_birth || ''}"></td></tr>

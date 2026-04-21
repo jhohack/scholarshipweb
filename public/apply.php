@@ -1083,9 +1083,9 @@ $page_title = 'Apply for Scholarship';
                             <div id="new-applicant-section">
                                 <h5 class="fw-bold text-primary mb-3">New Applicant Information</h5>
                                 <div class="alert alert-info border-0 shadow-sm">
-                                    <div class="fw-bold mb-1">Choose the correct path before filling out the form.</div>
-                                    <small class="d-block">Incoming Student: not yet enrolled, so school ID and current academic details are not required.</small>
-                                    <small class="d-block">Continuing Student: already enrolled, so complete all current school and academic fields.</small>
+                                    <div class="fw-bold mb-1">Choose the student status that matches your current situation.</div>
+                                    <small class="d-block">Incoming Student: apply as a new applicant and provide what details you already have available.</small>
+                                    <small class="d-block">Continuing Student: apply as a new applicant and complete the current school and academic fields.</small>
                                 </div>
 
                                 <div class="mb-4">
@@ -1095,14 +1095,14 @@ $page_title = 'Apply for Scholarship';
                                             <label class="border rounded-3 p-3 w-100 h-100 d-block">
                                                 <input class="form-check-input me-2" type="radio" name="student_status" value="Incoming Student" <?php echo $selected_student_status === 'Incoming Student' ? 'checked' : ''; ?> onchange="toggleStudentStatusSections()" required>
                                                 <span class="fw-bold d-block">Incoming Student</span>
-                                                <small class="text-muted">Apply as a new applicant without school ID, program, year level, units, or GWA.</small>
+                                                <small class="text-muted">Apply as a new applicant with the details you can provide now.</small>
                                             </label>
                                         </div>
                                         <div class="col-md-6">
                                             <label class="border rounded-3 p-3 w-100 h-100 d-block">
                                                 <input class="form-check-input me-2" type="radio" name="student_status" value="Continuing Student" <?php echo $selected_student_status === 'Continuing Student' ? 'checked' : ''; ?> onchange="toggleStudentStatusSections()" required>
                                                 <span class="fw-bold d-block">Continuing Student</span>
-                                                <small class="text-muted">Apply as a new applicant and complete all current academic requirements.</small>
+                                                <small class="text-muted">Apply as a new applicant and complete the current academic fields.</small>
                                             </label>
                                         </div>
                                     </div>
