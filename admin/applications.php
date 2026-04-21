@@ -27,6 +27,15 @@ function convertGwaToPercentage($gwa) {
     return round(110 - (10 * $gwa));
 }
 
+function isAcademicPlaceholderValue($value): bool {
+    if ($value === null) {
+        return true;
+    }
+
+    $normalized = strtolower(trim((string)$value));
+    return $normalized === '' || in_array($normalized, ['pending', 'not enrolled', 'incoming', 'incoming student'], true);
+}
+
 function getApplicantStatusLabel(array $application): string {
     if (($application['applicant_type'] ?? '') === 'Renewal') {
         return 'Renewal Student';
@@ -37,10 +46,19 @@ function getApplicantStatusLabel(array $application): string {
 
 function formatAcademicDisplay(array $application, string $field): string {
     if ($field === 'gwa') {
-        return convertGwaToPercentage($application[$field] ?? '');
+        $value = $application[$field] ?? null;
+        if (isAcademicPlaceholderValue($value) || !is_numeric($value)) {
+            return '-';
+        }
+
+        return convertGwaToPercentage($value);
     }
 
     $value = $application[$field] ?? null;
+    if (isAcademicPlaceholderValue($value)) {
+        return '-';
+    }
+
     return ($value === null || $value === '') ? '-' : (string)$value;
 }
 
