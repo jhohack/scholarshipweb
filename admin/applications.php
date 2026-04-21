@@ -2178,12 +2178,7 @@ function viewApplicant(appId) {
                 yearLevelOptions += `<option value="${app.year_level}" selected>${app.year_level}</option>`;
             }
 
-            const incomingNotice = app.student_status === 'Incoming Student'
-                ? '<div class="alert alert-warning py-2 small mb-3">This applicant is tagged as Incoming Student. Academic fields may stay blank until enrollment is completed.</div>'
-                : '';
-
             document.getElementById('education-content').innerHTML = `
-                ${incomingNotice}
                 <table class="table table-borderless">
                     <tr><th width="30%">Program:</th><td><select class="form-select form-select-sm" name="program">${programOptions}</select></td></tr>
                     <tr><th>Year Level:</th><td><select class="form-select form-select-sm" name="year_level">${yearLevelOptions}</select></td></tr>
