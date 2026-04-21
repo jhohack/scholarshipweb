@@ -27,11 +27,6 @@ function convertGwaToPercentage($gwa) {
     return round(110 - (10 * $gwa));
 }
 
-function isIncomingApplicant(array $application): bool {
-    return ($application['applicant_type'] ?? '') === 'New'
-        && ($application['student_status'] ?? '') === 'Incoming Student';
-}
-
 function getApplicantStatusLabel(array $application): string {
     if (($application['applicant_type'] ?? '') === 'Renewal') {
         return 'Renewal Student';
@@ -41,15 +36,6 @@ function getApplicantStatusLabel(array $application): string {
 }
 
 function formatAcademicDisplay(array $application, string $field): string {
-    if (isIncomingApplicant($application)) {
-        return match ($field) {
-            'program' => 'Incoming',
-            'year_level' => 'Not Enrolled',
-            'units_enrolled', 'gwa' => 'Pending',
-            default => '-',
-        };
-    }
-
     if ($field === 'gwa') {
         return convertGwaToPercentage($application[$field] ?? '');
     }
