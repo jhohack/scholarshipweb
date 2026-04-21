@@ -136,10 +136,9 @@ displayFlashMessages();
             <div class="mb-2">
                 <?php if (!empty($dashboard_review_request)): ?>
                     <?php echo htmlspecialchars($dashboard_review_request['scholarship_name'] ?? 'Your application'); ?> is under review and <?php echo (int) ($dashboard_review_request['count'] ?? 0); ?> file<?php echo ((int) ($dashboard_review_request['count'] ?? 0) === 1) ? '' : 's'; ?> need to be re-uploaded.
-                    Upload only the requested files. You do not need to fill out the application form again.
+                    Upload only the requested files. You can also remove a file first if it needs to be cleared, and you do not need to fill out the application form again.
                 <?php else: ?>
-                    <?php echo htmlspecialchars($active_scholarship['name'] ?? 'Your application'); ?> is currently under review. We will post the next update here.
-                    You do not need to fill out the application form again.
+                    <?php echo htmlspecialchars($active_scholarship['name'] ?? 'Your application'); ?> is currently under review. If the admin needs a file fixed, you can re-upload it here without filling out the application form again.
                 <?php endif; ?>
             </div>
             <?php if (!empty($dashboard_review_request)): ?>
@@ -147,6 +146,10 @@ displayFlashMessages();
                     <div class="small text-dark mb-3"><strong>Note:</strong> <?php echo htmlspecialchars($dashboard_review_request['note']); ?></div>
                 <?php endif; ?>
                 <a href="reupload-document.php?application_id=<?php echo (int) ($dashboard_review_request['application_id'] ?? 0); ?>" class="btn btn-warning btn-sm fw-bold">
+                    <i class="bi bi-upload me-1"></i> Re-upload files
+                </a>
+            <?php elseif (!empty($active_scholarship['application_id'])): ?>
+                <a href="reupload-document.php?application_id=<?php echo (int) $active_scholarship['application_id']; ?>" class="btn btn-info btn-sm fw-bold text-dark">
                     <i class="bi bi-upload me-1"></i> Re-upload files
                 </a>
             <?php endif; ?>
@@ -234,11 +237,21 @@ displayFlashMessages();
                     <div class="small mb-2">
                         <?php echo htmlspecialchars($dashboard_request['scholarship_name'] ?? 'Your application'); ?> needs <?php echo (int) ($dashboard_request['count'] ?? 0); ?> file<?php echo ((int) ($dashboard_request['count'] ?? 0) === 1) ? '' : 's'; ?> re-uploaded.
                     </div>
-                    <div class="small text-dark mb-3">Only upload the requested files. Your other application details stay as they are.</div>
+                    <div class="small text-dark mb-3">Only upload the requested files. You can also remove a file first if it needs to be cleared. Your other application details stay as they are.</div>
                     <?php if (!empty($dashboard_request['note'])): ?>
                         <div class="small text-dark mb-3"><strong>Note:</strong> <?php echo htmlspecialchars($dashboard_request['note']); ?></div>
                     <?php endif; ?>
                     <a href="reupload-document.php?application_id=<?php echo (int) ($dashboard_request['application_id'] ?? 0); ?>" class="btn btn-warning btn-sm fw-bold">
+                        <i class="bi bi-upload me-1"></i> Re-upload files
+                    </a>
+                </div>
+            <?php elseif ($active_scholarship && $active_scholarship['status'] === 'Under Review'): ?>
+                <div class="alert alert-info border-info shadow-sm">
+                    <div class="fw-bold mb-1"><i class="bi bi-upload me-1"></i>Re-upload Available</div>
+                    <div class="small mb-2">
+                        <?php echo htmlspecialchars($active_scholarship['name'] ?? 'Your application'); ?> is under review. You can replace any file without filling out the full form again.
+                    </div>
+                    <a href="reupload-document.php?application_id=<?php echo (int) ($active_scholarship['application_id'] ?? 0); ?>" class="btn btn-info btn-sm fw-bold text-dark">
                         <i class="bi bi-upload me-1"></i> Re-upload files
                     </a>
                 </div>

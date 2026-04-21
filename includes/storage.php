@@ -308,6 +308,52 @@ if (!function_exists('deleteStoredFileByPath')) {
     }
 }
 
+if (!function_exists('removeApplicationDocumentFile')) {
+    function removeApplicationDocumentFile(PDO $pdo, int $documentId, ?int $expectedUserId = null, ?int $expectedApplicationId = null, ?string $basePath = null): array
+    {
+        $stmt = $pdo->prepare("
+            SELECT id, user_id, application_id, file_name, file_path
+            FROM documents
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$documentId]);
+        $document = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$document) {
+            return ['success' => false, 'error' => 'Document record not found.'];
+        }
+
+        if ($expectedUserId !== null && (int) ($document['user_id'] ?? 0) !== $expectedUserId) {
+            return ['success' => false, 'error' => 'You are not allowed to remove this document.'];
+        }
+
+        if ($expectedApplicationId !== null && (int) ($document['application_id'] ?? 0) !== $expectedApplicationId) {
+            return ['success' => false, 'error' => 'This document does not belong to the selected application.'];
+        }
+
+        $oldPath = $document['file_path'] ?? '';
+
+        try {
+            $updateStmt = $pdo->prepare("
+                UPDATE documents
+                SET file_path = NULL, uploaded_at = NULL
+                WHERE id = ?
+            ");
+            $updateStmt->execute([$documentId]);
+        } catch (Throwable $e) {
+            return ['success' => false, 'error' => 'Failed to clear the document record: ' . $e->getMessage()];
+        }
+
+        return [
+            'success' => true,
+            'document_id' => $documentId,
+            'previous_name' => $document['file_name'] ?? '',
+            'previous_path' => $oldPath,
+        ];
+    }
+}
+
 if (!function_exists('replaceLegacyMissingDocument')) {
     function replaceLegacyMissingDocument(PDO $pdo, int $documentId, array $file, ?int $expectedUserId = null, ?int $expectedApplicationId = null, ?string $basePath = null): array
     {

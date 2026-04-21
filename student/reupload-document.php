@@ -19,6 +19,8 @@ $student_id = null;
 $application = null;
 $open_reupload_requests = [];
 $request_group = null;
+$application_documents = [];
+$generic_reupload_mode = false;
 $errors = [];
 
 try {
@@ -46,6 +48,16 @@ try {
             if ($application) {
                 $open_reupload_requests = getOpenDocumentReuploadRequests($pdo, (int) $student_id, (int) $application['id']);
                 $request_group = $open_reupload_requests[0] ?? null;
+
+                $doc_stmt = $pdo->prepare("
+                    SELECT id, file_name, file_path, uploaded_at
+                    FROM documents
+                    WHERE application_id = ?
+                    ORDER BY id ASC
+                ");
+                $doc_stmt->execute([(int) $application['id']]);
+                $application_documents = $doc_stmt->fetchAll(PDO::FETCH_ASSOC);
+                $generic_reupload_mode = strcasecmp((string) ($application['status'] ?? ''), 'Under Review') === 0 && empty($request_group);
             }
         }
     }
@@ -64,9 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_reupload'])) {
         $open_reupload_requests = getOpenDocumentReuploadRequests($pdo, (int) $student_id, (int) $application['id']);
         $request_group = $open_reupload_requests[0] ?? null;
 
-        if (!$request_group) {
-            $errors[] = 'This re-upload request has already been completed or closed. Please return to your applications list.';
-        } else {
+        if ($request_group) {
             $requests = $request_group['documents'] ?? [];
             $missingFiles = [];
             foreach ($requests as $request) {
@@ -125,18 +135,135 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_reupload'])) {
                     $errors[] = $e->getMessage();
                 }
             }
+        } else {
+            $applicationStatus = strtolower(trim((string) ($application['status'] ?? '')));
+
+            if ($applicationStatus !== 'under review') {
+                $errors[] = 'This re-upload request has already been completed or closed. Please return to your applications list.';
+            } elseif (empty($application_documents)) {
+                $errors[] = 'No documents were found for this application to re-upload.';
+            } else {
+                $replacement_docs = [];
+                $removed_docs = [];
+
+                foreach ($application_documents as $document) {
+                    $documentId = (int) ($document['id'] ?? 0);
+                    if ($documentId <= 0) {
+                        continue;
+                    }
+
+                    $fileName = $_FILES['replacement_files']['name'][$documentId] ?? '';
+                    $fileError = $_FILES['replacement_files']['error'][$documentId] ?? UPLOAD_ERR_NO_FILE;
+                    $removeRequested = !empty($_POST['remove_files'][$documentId]);
+                    $hasUpload = $fileError !== UPLOAD_ERR_NO_FILE && trim((string) $fileName) !== '';
+
+                    if (!$hasUpload) {
+                        if ($removeRequested) {
+                            $removed_docs[] = $documentId;
+                        }
+                        continue;
+                    }
+
+                    if ($fileError !== UPLOAD_ERR_OK) {
+                        $errors[] = 'One or more selected files could not be uploaded. Please try again with PDF files only.';
+                        break;
+                    }
+
+                    $replacement_docs[] = [
+                        'document_id' => $documentId,
+                        'file' => [
+                            'name' => $fileName,
+                            'type' => $_FILES['replacement_files']['type'][$documentId] ?? '',
+                            'tmp_name' => $_FILES['replacement_files']['tmp_name'][$documentId] ?? '',
+                            'error' => $fileError,
+                            'size' => $_FILES['replacement_files']['size'][$documentId] ?? 0,
+                        ],
+                    ];
+                }
+
+                if (empty($errors)) {
+                    if (empty($replacement_docs) && empty($removed_docs)) {
+                        $errors[] = 'Please upload a replacement PDF or select a file to remove.';
+                    } else {
+                        $uploadedPaths = [];
+                        $removedPaths = [];
+
+                        try {
+                            $pdo->beginTransaction();
+
+                            foreach ($replacement_docs as $item) {
+                                $result = replaceApplicationDocument(
+                                    $pdo,
+                                    (int) $item['document_id'],
+                                    $item['file'],
+                                    $user_id,
+                                    (int) $application['id'],
+                                    $base_path
+                                );
+
+                                if (empty($result['success'])) {
+                                    throw new RuntimeException($result['error'] ?? 'Failed to replace one of the selected documents.');
+                                }
+
+                                $uploadedPaths[] = $result['path'] ?? '';
+                            }
+
+                            foreach ($removed_docs as $documentId) {
+                                $result = removeApplicationDocumentFile(
+                                    $pdo,
+                                    (int) $documentId,
+                                    $user_id,
+                                    (int) $application['id'],
+                                    $base_path
+                                );
+
+                                if (empty($result['success'])) {
+                                    throw new RuntimeException($result['error'] ?? 'Failed to remove one of the selected documents.');
+                                }
+
+                                if (!empty($result['previous_path'])) {
+                                    $removedPaths[] = $result['previous_path'];
+                                }
+                            }
+
+                            $pdo->commit();
+
+                            foreach ($uploadedPaths as $path) {
+                                deleteStoredFileByPath($pdo, $path, $base_path);
+                            }
+                            foreach ($removedPaths as $path) {
+                                deleteStoredFileByPath($pdo, $path, $base_path);
+                            }
+
+                            flashMessage('Your selected file changes were submitted successfully. The admin will review them shortly.');
+                            header("Location: applications.php");
+                            exit();
+                        } catch (Throwable $e) {
+                            if ($pdo->inTransaction()) {
+                                $pdo->rollBack();
+                            }
+
+                            foreach ($uploadedPaths as $path) {
+                                deleteStoredFileByPath($pdo, $path, $base_path);
+                            }
+
+                            $errors[] = $e->getMessage();
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
-$page_title = 'Re-upload Requested Files';
+$page_title = 'Re-upload Files';
 include 'header.php';
 displayFlashMessages();
 ?>
 
 <div class="page-header" data-aos="fade-down">
-    <h1 class="fw-bold">Re-upload Requested Files</h1>
-    <p class="text-muted mb-0">Upload only the documents that the admin asked you to replace. Your other application details stay unchanged.</p>
+    <h1 class="fw-bold">Re-upload Files</h1>
+    <p class="text-muted mb-0">Upload only the files that need to be replaced or remove the ones that need to be cleared. Your other application details stay unchanged.</p>
 </div>
 
 <?php if (!$application): ?>
@@ -148,15 +275,7 @@ displayFlashMessages();
             <a href="applications.php" class="btn btn-outline-primary">Back to Applications</a>
         </div>
     </div>
-<?php elseif (!$request_group): ?>
-    <div class="content-block" data-aos="fade-up">
-        <div class="alert alert-info border-info shadow-sm">
-            <div class="fw-bold mb-1">This request is no longer active</div>
-            <div class="mb-2">The documents may already have been submitted, reviewed, or the request may have been closed. Check your Applications page for the latest update.</div>
-            <a href="applications.php" class="btn btn-outline-primary">Back to Applications</a>
-        </div>
-    </div>
-<?php else: ?>
+<?php elseif ($request_group): ?>
     <div class="row g-4">
         <div class="col-lg-8">
             <div class="content-block" data-aos="fade-up">
@@ -265,6 +384,131 @@ displayFlashMessages();
                     <p class="small text-muted mb-0">If you are unsure which file to upload, open the admin note above or message the scholarship office from the portal chat.</p>
                 </div>
             </div>
+        </div>
+    </div>
+<?php elseif ($generic_reupload_mode && !empty($application_documents)): ?>
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div class="content-block" data-aos="fade-up">
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+                    <div>
+                        <span class="badge bg-info text-dark mb-2">Under Review</span>
+                        <h3 class="fw-bold mb-1"><?php echo htmlspecialchars($application['scholarship_name']); ?></h3>
+                        <div class="text-muted">Current application status: <?php echo htmlspecialchars(formatApplicationStatus($application['status'])); ?></div>
+                    </div>
+                    <a href="applications.php" class="btn btn-outline-secondary">Back to Applications</a>
+                </div>
+
+                <div class="alert alert-info border-info">
+                    <i class="bi bi-upload me-1"></i>
+                    Your application is under review. You can replace or remove any file below without filling out the full form again.
+                </div>
+
+                <div class="alert alert-light border">
+                    <div class="fw-bold mb-1">How this works</div>
+                    <div class="text-muted">Leave any file blank if it does not need to be changed. Use the remove checkbox if you want to clear a file slot first.</div>
+                </div>
+
+                <?php if (!empty($errors)): ?>
+                    <div class="alert alert-danger">
+                        <ul class="mb-0">
+                            <?php foreach ($errors as $error): ?>
+                                <li><?php echo htmlspecialchars($error); ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
+                <?php endif; ?>
+
+                <form method="post" enctype="multipart/form-data">
+                    <input type="hidden" name="submit_reupload" value="1">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(generate_csrf_token()); ?>">
+                    <input type="hidden" name="application_id" value="<?php echo (int) $application['id']; ?>">
+
+                    <div class="row g-3">
+                        <?php foreach ($application_documents as $document): ?>
+                            <?php
+                                $documentId = (int) ($document['id'] ?? 0);
+                                $docName = trim((string) ($document['file_name'] ?? '')) !== '' ? (string) $document['file_name'] : 'Document';
+                                $currentPath = $document['file_path'] ?? '';
+                                $currentFile = describeStoredFile($pdo, $currentPath, $base_path);
+                                $currentAvailable = !empty($currentFile['url']);
+                            ?>
+                            <div class="col-12">
+                                <div class="card border-info shadow-sm">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start gap-3">
+                                            <div>
+                                                <div class="fw-bold mb-1"><?php echo htmlspecialchars($docName); ?></div>
+                                                <div class="small text-muted">
+                                                    <?php if ($currentAvailable): ?>
+                                                        <a href="<?php echo htmlspecialchars($currentFile['url']); ?>" target="_blank" rel="noopener">Open current file</a>
+                                                    <?php else: ?>
+                                                        Current file not available.
+                                                    <?php endif; ?>
+                                                </div>
+                                            </div>
+                                            <span class="badge bg-info text-dark">Optional replacement</span>
+                                        </div>
+                                        <div class="mt-3">
+                                            <label class="form-label fw-bold">Upload replacement PDF</label>
+                                            <input type="file" class="form-control" name="replacement_files[<?php echo $documentId; ?>]" accept=".pdf,application/pdf">
+                                            <div class="form-text">Upload only if this file needs to be updated.</div>
+                                        </div>
+                                        <?php if ($currentAvailable): ?>
+                                            <div class="form-check mt-3">
+                                                <input class="form-check-input" type="checkbox" name="remove_files[<?php echo $documentId; ?>]" id="remove-file-<?php echo $documentId; ?>" value="1">
+                                                <label class="form-check-label fw-semibold text-danger" for="remove-file-<?php echo $documentId; ?>">
+                                                    Remove this file
+                                                </label>
+                                                <div class="form-text">Use this if the file is wrong or needs to be cleared before you upload a new one.</div>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+
+                    <div class="d-flex gap-2 mt-4">
+                        <button type="submit" class="btn btn-info text-dark fw-bold">
+                            <i class="bi bi-upload me-1"></i> Submit Updated Files
+                        </button>
+                        <a href="applications.php" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="content-block h-100" data-aos="fade-up" data-aos-delay="100">
+                <h3 class="fw-bold">What happens next</h3>
+                <div class="alert alert-info border-0">
+                    <ol class="mb-0 ps-3">
+                        <li>Choose the file(s) that need correction.</li>
+                        <li>Your profile, responses, and other details stay untouched.</li>
+                        <li>The admin reviews the updated documents after you submit.</li>
+                    </ol>
+                </div>
+                <div class="p-3 bg-light border rounded">
+                    <div class="fw-bold mb-2">Need help?</div>
+                    <p class="small text-muted mb-0">If you are unsure which file should change, message the scholarship office and we will point you to the right document.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+<?php elseif ($application && strcasecmp((string) ($application['status'] ?? ''), 'Under Review') === 0): ?>
+    <div class="content-block" data-aos="fade-up">
+        <div class="alert alert-info border-info shadow-sm mb-0">
+            <div class="fw-bold mb-1">Under Review</div>
+            <div class="mb-2">This application is under review, but no files are currently available to replace.</div>
+            <a href="applications.php" class="btn btn-outline-primary">Back to Applications</a>
+        </div>
+    </div>
+<?php else: ?>
+    <div class="content-block" data-aos="fade-up">
+        <div class="alert alert-info border-info shadow-sm">
+            <div class="fw-bold mb-1">This request is no longer active</div>
+            <div class="mb-2">The documents may already have been submitted, reviewed, or the request may have been closed. Check your Applications page for the latest update.</div>
+            <a href="applications.php" class="btn btn-outline-primary">Back to Applications</a>
         </div>
     </div>
 <?php endif; ?>

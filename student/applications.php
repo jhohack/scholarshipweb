@@ -46,6 +46,14 @@ try {
     foreach ($open_reupload_requests as $request_group) {
         $reupload_request_map[(int) ($request_group['application_id'] ?? 0)] = $request_group;
     }
+
+    $under_review_application = null;
+    foreach ($applications as $application) {
+        if (strcasecmp((string) ($application['status'] ?? ''), 'Under Review') === 0) {
+            $under_review_application = $application;
+            break;
+        }
+    }
 } catch (PDOException $e) {
     $applications = [];
     // Log the error in production
@@ -75,11 +83,24 @@ include 'header.php';
                 <div class="mb-2">
                     <?php echo htmlspecialchars($primary_request['scholarship_name'] ?? 'Your application'); ?> needs <?php echo (int) ($primary_request['count'] ?? 0); ?> file<?php echo ((int) ($primary_request['count'] ?? 0) === 1) ? '' : 's'; ?> re-uploaded.
                 </div>
-                <div class="small text-dark mb-2">Only upload the files listed by the admin. You do not need to submit the whole application again.</div>
+                <div class="small text-dark mb-2">Only upload the files listed by the admin. You can also remove a file first if it needs to be cleared. You do not need to submit the whole application again.</div>
                 <?php if (!empty($primary_request['note'])): ?>
                     <div class="small text-dark mb-2"><strong>Note:</strong> <?php echo htmlspecialchars($primary_request['note']); ?></div>
                 <?php endif; ?>
                 <a href="reupload-document.php?application_id=<?php echo (int) ($primary_request['application_id'] ?? 0); ?>" class="btn btn-warning fw-bold">
+                    <i class="bi bi-upload me-2"></i>Re-upload files
+                </a>
+            </div>
+        </div>
+    <?php elseif (!empty($under_review_application)): ?>
+        <div class="alert alert-info border-info shadow-sm d-flex align-items-start gap-3">
+            <div class="fs-3 lh-1"><i class="bi bi-upload"></i></div>
+            <div class="flex-grow-1">
+                <div class="fw-bold mb-1">Under Review</div>
+                <div class="mb-2">
+                    <?php echo htmlspecialchars($under_review_application['scholarship_name'] ?? 'Your application'); ?> is under review. If a file needs fixing, you can replace it here without filling out the whole form again.
+                </div>
+                <a href="reupload-document.php?application_id=<?php echo (int) ($under_review_application['id'] ?? 0); ?>" class="btn btn-info fw-bold text-dark">
                     <i class="bi bi-upload me-2"></i>Re-upload files
                 </a>
             </div>
@@ -106,7 +127,7 @@ include 'header.php';
                 <tbody>
                     <?php foreach ($applications as $application): ?>
                         <?php $reupload_request = $reupload_request_map[(int) $application['id']] ?? null; ?>
-                        <tr class="<?php echo $reupload_request ? 'table-warning-subtle' : ''; ?>">
+                        <tr class="<?php echo $reupload_request ? 'table-warning-subtle' : (strcasecmp((string) ($application['status'] ?? ''), 'Under Review') === 0 ? 'table-info-subtle' : ''); ?>">
                             <?php
                             // Standardize the status display for the user using the global function
                             $display_status = formatApplicationStatus($application['status']);
@@ -145,6 +166,10 @@ include 'header.php';
                                     <div class="mt-2">
                                         <span class="badge bg-warning text-dark">Action Required</span>
                                     </div>
+                                <?php elseif (strcasecmp((string) ($application['status'] ?? ''), 'Under Review') === 0): ?>
+                                    <div class="mt-2">
+                                        <span class="badge bg-info text-dark">Re-upload available</span>
+                                    </div>
                                 <?php endif; ?>
                             </td>
                             <td class="text-center">
@@ -153,6 +178,11 @@ include 'header.php';
                                         <i class="bi bi-upload me-1"></i> Re-upload
                                     </a>
                                     <div class="small text-muted mt-2"><?php echo (int) ($reupload_request['count'] ?? 0); ?> file<?php echo ((int) ($reupload_request['count'] ?? 0) === 1) ? '' : 's'; ?> needed</div>
+                                <?php elseif (strcasecmp((string) ($application['status'] ?? ''), 'Under Review') === 0): ?>
+                                    <a href="reupload-document.php?application_id=<?php echo (int) $application['id']; ?>" class="btn btn-sm btn-info fw-bold text-dark">
+                                        <i class="bi bi-upload me-1"></i> Re-upload files
+                                    </a>
+                                    <div class="small text-muted mt-2">Replace or remove any file that needs correction.</div>
                                 <?php else: ?>
                                     <span class="text-muted">-</span>
                                 <?php endif; ?>
