@@ -167,7 +167,7 @@ $resolvedDbSslMode = env_config(
 );
 $resolvedDbChannelBinding = env_config(
     'DB_CHANNEL_BINDING',
-    ''
+    $parsedDatabaseUrl['channel_binding'] ?? ''
 );
 $resolvedDbNeonEndpoint = env_config('DB_NEON_ENDPOINT', '');
 if ($resolvedDbNeonEndpoint === '' && $resolvedDbDriver === 'pgsql' && is_string($resolvedDbHost)) {
