@@ -1083,9 +1083,8 @@ $page_title = 'Apply for Scholarship';
                             <div id="new-applicant-section">
                                 <h5 class="fw-bold text-primary mb-3">New Applicant Information</h5>
                                 <div class="alert alert-info border-0 shadow-sm">
-                                    <div class="fw-bold mb-1">Choose the correct path before filling out the form.</div>
-                                    <small class="d-block">Incoming Student: not yet enrolled, so school ID and current academic details are not required.</small>
-                                    <small class="d-block">Continuing Student: already enrolled, so complete all current school and academic fields.</small>
+                                    <div class="fw-bold mb-1">Choose the student status that matches your current situation.</div>
+                                    <small class="d-block">School and academic details remain editable for every applicant.</small>
                                 </div>
 
                                 <div class="mb-4">
@@ -1095,14 +1094,12 @@ $page_title = 'Apply for Scholarship';
                                             <label class="border rounded-3 p-3 w-100 h-100 d-block">
                                                 <input class="form-check-input me-2" type="radio" name="student_status" value="Incoming Student" <?php echo $selected_student_status === 'Incoming Student' ? 'checked' : ''; ?> onchange="toggleStudentStatusSections()" required>
                                                 <span class="fw-bold d-block">Incoming Student</span>
-                                                <small class="text-muted">Apply as a new applicant without school ID, program, year level, units, or GWA.</small>
                                             </label>
                                         </div>
                                         <div class="col-md-6">
                                             <label class="border rounded-3 p-3 w-100 h-100 d-block">
                                                 <input class="form-check-input me-2" type="radio" name="student_status" value="Continuing Student" <?php echo $selected_student_status === 'Continuing Student' ? 'checked' : ''; ?> onchange="toggleStudentStatusSections()" required>
                                                 <span class="fw-bold d-block">Continuing Student</span>
-                                                <small class="text-muted">Apply as a new applicant and complete all current academic requirements.</small>
                                             </label>
                                         </div>
                                     </div>
@@ -1246,18 +1243,18 @@ $page_title = 'Apply for Scholarship';
                                     </div>
                                 </div>
 
-                                <div id="continuing-student-fields" data-student-visibility="Continuing Student">
+                                <div id="continuing-student-fields">
                                     <h5 class="fw-bold text-primary mb-3 mt-4">Current Enrollment Details</h5>
-                                    <div class="alert alert-warning border-0">
-                                        <small>Continuing students must complete their current school, school ID, program, year level, units, and GWA.</small>
+                                    <div class="alert alert-info border-0">
+                                        <small>These school and academic details stay editable for every applicant, whether or not enrollment is complete.</small>
                                     </div>
                                     <div class="row g-3 mb-3">
                                         <div class="col-md-4">
-                                            <label class="form-label">School ID Number <span class="text-danger">*</span></label>
+                                            <label class="form-label">School ID Number</label>
                                             <input type="text" class="form-control" name="school_id" value="<?php echo htmlspecialchars($selected_school_id); ?>" data-required-for="Continuing Student">
                                         </div>
                                         <div class="col-md-4">
-                                            <label class="form-label">Year Level <span class="text-danger">*</span></label>
+                                            <label class="form-label">Year Level</label>
                                             <select class="form-select" name="year_level" data-required-for="Continuing Student">
                                                 <option value="">Select Year</option>
                                                 <option value="1st Year" <?php echo $selected_year_level === '1st Year' ? 'selected' : ''; ?>>1st Year</option>
@@ -1267,7 +1264,7 @@ $page_title = 'Apply for Scholarship';
                                             </select>
                                         </div>
                                         <div class="col-md-4">
-                                            <label class="form-label">Program <span class="text-danger">*</span></label>
+                                            <label class="form-label">Program</label>
                                             <select class="form-select" name="program" data-required-for="Continuing Student">
                                                 <option value="">Select Program</option>
                                                 <option value="BSIT" <?php echo $selected_program === 'BSIT' ? 'selected' : ''; ?>>BSIT</option>
@@ -1280,26 +1277,26 @@ $page_title = 'Apply for Scholarship';
                                     </div>
                                     <div class="row g-3 mb-3">
                                         <div class="col-md-8">
-                                            <label class="form-label">Current School <span class="text-danger">*</span></label>
+                                            <label class="form-label">Current School</label>
                                             <input type="text" class="form-control" name="fields[current_school]" value="<?php echo htmlspecialchars($_POST['fields']['current_school'] ?? ''); ?>" data-required-for="Continuing Student">
                                         </div>
                                         <div class="col-md-4">
-                                            <label class="form-label">Current Year Level <span class="text-danger">*</span></label>
+                                            <label class="form-label">Current Year Level</label>
                                             <input type="text" class="form-control" name="fields[current_year_level]" value="<?php echo htmlspecialchars($_POST['fields']['current_year_level'] ?? ''); ?>" data-required-for="Continuing Student">
                                         </div>
                                     </div>
                                     <div class="row g-3 mb-3">
                                         <div class="col-md-6">
-                                            <label class="form-label">Units Enrolled <span class="text-danger">*</span></label>
+                                            <label class="form-label">Units Enrolled</label>
                                             <input type="number" class="form-control" name="units_enrolled" value="<?php echo htmlspecialchars($_POST['units_enrolled'] ?? ''); ?>" data-required-for="Continuing Student">
                                         </div>
                                         <div class="col-md-6">
-                                            <label class="form-label">GWA (per semester) <span class="text-danger">*</span></label>
+                                            <label class="form-label">GWA (per semester)</label>
                                             <input type="number" step="0.01" min="1.00" max="100.00" class="form-control" name="gwa" value="<?php echo htmlspecialchars($_POST['gwa'] ?? ''); ?>" placeholder="00.00" oninput="if(parseFloat(this.value) > 100) this.value = 100;" data-required-for="Continuing Student">
                                         </div>
                                     </div>
                                     <div class="mb-4">
-                                        <label class="form-label fw-bold">Upload Scanned Copy of GWA (PDF) <span class="text-danger">*</span></label>
+                                        <label class="form-label fw-bold">Upload Scanned Copy of GWA (PDF)</label>
                                         <div class="input-group">
                                             <input type="file" class="form-control" id="gwa_document" name="gwa_document" accept=".pdf" data-required-for="Continuing Student">
                                             <button class="btn btn-outline-danger" type="button" id="remove_gwa_btn" style="display: none;" title="Remove file"><i class="bi bi-x-lg"></i></button>
@@ -1453,15 +1450,10 @@ $page_title = 'Apply for Scholarship';
         const selectedStatusInput = document.querySelector('input[name="student_status"]:checked');
         const selectedStatus = selectedStatusInput ? selectedStatusInput.value : '';
 
-        document.querySelectorAll('[data-student-visibility]').forEach(section => {
-            const shouldShow = selectedStatus !== '' && section.getAttribute('data-student-visibility') === selectedStatus;
-            section.style.display = shouldShow ? '' : 'none';
-
-            section.querySelectorAll('[data-required-for]').forEach(field => {
-                const isRequired = shouldShow && field.getAttribute('data-required-for') === selectedStatus;
-                field.disabled = !shouldShow;
-                field.required = isRequired;
-            });
+        document.querySelectorAll('[data-required-for]').forEach(field => {
+            const isRequired = selectedStatus === 'Continuing Student' && field.getAttribute('data-required-for') === 'Continuing Student';
+            field.disabled = false;
+            field.required = isRequired;
         });
     }
 

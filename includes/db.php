@@ -50,4 +50,8 @@ try {
 }
 
 require_once __DIR__ . '/db_schema.php';
+
+if (function_exists('dbEnsureUserStudentSyncSchema')) {
+    dbEnsureUserStudentSyncSchema($pdo);
+}
 ?>

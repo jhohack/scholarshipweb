@@ -23,6 +23,7 @@ $recent_applications = [];
 $active_scholarship = null;
 $drop_request_status = null;
 $pending_exam_application = null;
+$review_action = null;
 $student_id = null;
 
 try {
@@ -102,6 +103,8 @@ try {
         ");
         $app_stmt->execute([$student_id]);
         $recent_applications = $app_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $review_action = getStudentReviewAction($pdo, (int) $student_id);
     }
 } catch (PDOException $e) {
     // In a real app, you would log this error and potentially show a user-friendly error message.
@@ -119,6 +122,33 @@ displayFlashMessages();
         <p class="text-muted mb-0">Here's a summary of your scholarship activities.</p>
     </div>
 </div>
+
+<?php if (!empty($review_action)): ?>
+    <div class="alert <?php echo $review_action['mode'] === 'request' ? 'alert-warning border-warning shadow-sm' : 'alert-info border-info shadow-sm'; ?> d-flex align-items-start gap-3 mb-4" data-aos="fade-up">
+        <div class="fs-3 lh-1">
+            <i class="bi <?php echo $review_action['mode'] === 'request' ? 'bi-exclamation-triangle-fill' : 'bi-hourglass-split'; ?>"></i>
+        </div>
+        <div class="flex-grow-1">
+            <div class="fw-bold mb-1">
+                <?php echo $review_action['mode'] === 'request' ? 'Action Required' : 'Under Review'; ?>
+            </div>
+            <div class="mb-2">
+                <?php if ($review_action['mode'] === 'request'): ?>
+                    <?php echo htmlspecialchars($review_action['scholarship_name'] ?? 'Your application'); ?> needs <?php echo (int) ($review_action['count'] ?? 0); ?> file<?php echo ((int) ($review_action['count'] ?? 0) === 1) ? '' : 's'; ?> updated.
+                    Use the file editor to replace or clear the requested file(s). You do not need to fill out the application form again.
+                <?php else: ?>
+                    <?php echo htmlspecialchars($review_action['scholarship_name'] ?? 'Your application'); ?> is currently under review. Open the file editor if you need to replace or clear a file without filling out the application form again.
+                <?php endif; ?>
+            </div>
+            <?php if ($review_action['mode'] === 'request' && !empty($review_action['note'])): ?>
+                <div class="small text-dark mb-3"><strong>Note:</strong> <?php echo htmlspecialchars($review_action['note']); ?></div>
+            <?php endif; ?>
+            <a href="reupload-document.php?application_id=<?php echo (int) ($review_action['application_id'] ?? 0); ?>" class="btn <?php echo $review_action['mode'] === 'request' ? 'btn-warning' : 'btn-info text-dark'; ?> btn-sm fw-bold">
+                <i class="bi bi-folder2-open me-1"></i> Open file editor
+            </a>
+        </div>
+    </div>
+<?php endif; ?>
 
 <!-- Recent Applications -->
 <div class="row">

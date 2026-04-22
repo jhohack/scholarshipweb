@@ -211,8 +211,8 @@ include 'header.php';
                     </div>
                     <div class="col-md-6">
                         <label for="school_id" class="form-label">School ID</label>
-                        <input type="text" class="form-control" id="school_id" name="school_id" value="<?php echo htmlspecialchars($student['school_id'] ?? ''); ?>" placeholder="Enter your school ID once available">
-                        <div class="form-text">Incoming students can leave this blank for now and update it later after enrollment.</div>
+                        <input type="text" class="form-control" id="school_id" name="school_id" value="<?php echo htmlspecialchars($student['school_id'] ?? ''); ?>" placeholder="Enter your school ID if available">
+                        <div class="form-text">You can update this anytime from your profile.</div>
                     </div>
                 </div>
                 <div class="mt-4">

@@ -29,7 +29,7 @@ try {
     if ($student) {
         $student_id = $student['id'];
         $stmt = $pdo->prepare("
-            SELECT s.name AS scholarship_name, a.status, a.submitted_at 
+            SELECT a.id, s.name AS scholarship_name, a.status, a.submitted_at, a.updated_at
             FROM applications a 
             JOIN scholarships s ON a.scholarship_id = s.id 
             WHERE a.student_id = ? 
@@ -40,6 +40,8 @@ try {
     } else {
         $applications = [];
     }
+
+    $review_action = $student_id ? getStudentReviewAction($pdo, (int) $student_id) : null;
 } catch (PDOException $e) {
     $applications = [];
     // Log the error in production
@@ -60,6 +62,32 @@ include 'header.php';
         <h3 class="mb-0">Application History</h3>
         <span class="badge bg-primary-soft text-primary fs-6 rounded-pill"><?php echo count($applications); ?> Applications</span>
     </div>
+    <?php if (!empty($review_action)): ?>
+        <?php
+            $review_alert_class = $review_action['mode'] === 'request' ? 'alert-warning border-warning' : 'alert-info border-info';
+            $review_icon_class = $review_action['mode'] === 'request' ? 'bi-exclamation-triangle-fill' : 'bi-hourglass-split';
+        ?>
+        <div class="alert <?php echo $review_alert_class; ?> shadow-sm d-flex align-items-start gap-3">
+            <div class="fs-3 lh-1"><i class="bi <?php echo $review_icon_class; ?>"></i></div>
+            <div class="flex-grow-1">
+                <div class="fw-bold mb-1"><?php echo $review_action['mode'] === 'request' ? 'Action Required' : 'Under Review'; ?></div>
+                <div class="mb-2">
+                    <?php if ($review_action['mode'] === 'request'): ?>
+                        <?php echo htmlspecialchars($review_action['scholarship_name'] ?? 'Your application'); ?> needs <?php echo (int) ($review_action['count'] ?? 0); ?> file<?php echo ((int) ($review_action['count'] ?? 0) === 1) ? '' : 's'; ?> updated.
+                    <?php else: ?>
+                        <?php echo htmlspecialchars($review_action['scholarship_name'] ?? 'Your application'); ?> is currently under review.
+                    <?php endif; ?>
+                </div>
+                <div class="small text-dark mb-2">Open the file editor to replace or clear a file without filling out the whole form again.</div>
+                <?php if ($review_action['mode'] === 'request' && !empty($review_action['note'])): ?>
+                    <div class="small text-dark mb-2"><strong>Note:</strong> <?php echo htmlspecialchars($review_action['note']); ?></div>
+                <?php endif; ?>
+                <a href="reupload-document.php?application_id=<?php echo (int) ($review_action['application_id'] ?? 0); ?>" class="btn btn-outline-primary fw-bold">
+                    <i class="bi bi-folder2-open me-2"></i>Open file editor
+                </a>
+            </div>
+        </div>
+    <?php endif; ?>
     <div class="table-responsive">
         <?php if (empty($applications)): ?>
             <div class="text-center py-5">
@@ -79,7 +107,11 @@ include 'header.php';
                 </thead>
                 <tbody>
                     <?php foreach ($applications as $application): ?>
-                        <tr>
+                        <?php
+                            $is_review_action_row = !empty($review_action) && (int) ($review_action['application_id'] ?? 0) === (int) $application['id'];
+                            $is_under_review = strcasecmp((string) ($application['status'] ?? ''), 'Under Review') === 0;
+                        ?>
+                        <tr class="<?php echo $is_review_action_row ? ($review_action['mode'] === 'request' ? 'table-warning-subtle' : 'table-info-subtle') : ($is_under_review ? 'table-info-subtle' : ''); ?>">
                             <?php
                             // Standardize the status display for the user using the global function
                             $display_status = formatApplicationStatus($application['status']);
@@ -114,6 +146,15 @@ include 'header.php';
                             <td class="text-muted"><?php echo htmlspecialchars(date('F j, Y', strtotime($application['submitted_at']))); ?></td>
                             <td class="text-center">
                                 <span class="badge <?php echo $badge_bg; ?>"><i class="bi <?php echo $icon_class; ?> me-1"></i><?php echo htmlspecialchars($display_status); ?></span>
+                                <?php if ($is_review_action_row && $review_action['mode'] === 'request'): ?>
+                                    <div class="mt-2">
+                                        <span class="badge bg-warning text-dark">Action Required</span>
+                                    </div>
+                                <?php elseif ($is_review_action_row && $review_action['mode'] === 'review'): ?>
+                                    <div class="mt-2">
+                                        <span class="badge bg-info text-dark">File editor available</span>
+                                    </div>
+                                <?php endif; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>
