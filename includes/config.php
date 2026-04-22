@@ -120,7 +120,6 @@ if ($databaseUrl) {
             'pass' => isset($parsedUrl['pass']) ? rawurldecode($parsedUrl['pass']) : null,
             'sslmode' => $queryParams['sslmode'] ?? null,
             'options' => $queryParams['options'] ?? null,
-            'channel_binding' => $queryParams['channel_binding'] ?? null,
         ];
     }
 }
@@ -165,10 +164,6 @@ $resolvedDbSslMode = env_config(
     'DB_SSL_MODE',
     $parsedDatabaseUrl['sslmode'] ?? ($resolvedDbDriver === 'pgsql' && !$isLocalHost ? 'require' : '')
 );
-$resolvedDbChannelBinding = env_config(
-    'DB_CHANNEL_BINDING',
-    $parsedDatabaseUrl['channel_binding'] ?? ''
-);
 $resolvedDbNeonEndpoint = env_config('DB_NEON_ENDPOINT', '');
 if ($resolvedDbNeonEndpoint === '' && $resolvedDbDriver === 'pgsql' && is_string($resolvedDbHost)) {
     if (preg_match('/^([^.]+)\..*\\.neon\\.tech$/i', $resolvedDbHost, $matches)) {
@@ -191,7 +186,6 @@ define('DB_USER', $resolvedDbUser);
 define('DB_PASS', $resolvedDbPass);
 define('DB_PORT', $resolvedDbPort);
 define('DB_SSL_MODE', $resolvedDbSslMode);
-define('DB_CHANNEL_BINDING', $resolvedDbChannelBinding);
 define('DB_NEON_ENDPOINT', $resolvedDbNeonEndpoint);
 define('DB_PG_OPTIONS', $resolvedDbPgOptions);
 define('BASE_URL', rtrim(env_config('BASE_URL', $legacyBaseUrl), '/'));

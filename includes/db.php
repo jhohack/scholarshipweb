@@ -13,9 +13,6 @@ try {
         if (defined('DB_SSL_MODE') && DB_SSL_MODE !== '') {
             $dsn .= ";sslmode=" . DB_SSL_MODE;
         }
-        if (defined('DB_CHANNEL_BINDING') && DB_CHANNEL_BINDING !== '') {
-            $dsn .= ";channel_binding=" . DB_CHANNEL_BINDING;
-        }
         if (defined('DB_PG_OPTIONS') && DB_PG_OPTIONS !== '') {
             $dsn .= ";options=" . DB_PG_OPTIONS;
         }
