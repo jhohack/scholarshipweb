@@ -122,7 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_reupload'])) {
                     }
 
                     $pdo->commit();
-                    flashMessage('Your re-uploaded files were submitted successfully. The admin will review them shortly.');
+                    flashMessage('Your updated files were saved successfully. The previous copies were replaced, and the admin will review them shortly.');
                     header("Location: applications.php");
                     exit();
                 } catch (Throwable $e) {
@@ -156,6 +156,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_reupload'])) {
                     $fileError = $_FILES['replacement_files']['error'][$documentId] ?? UPLOAD_ERR_NO_FILE;
                     $removeRequested = !empty($_POST['remove_files'][$documentId]);
                     $hasUpload = $fileError !== UPLOAD_ERR_NO_FILE && trim((string) $fileName) !== '';
+
+                    if ($hasUpload) {
+                        $removeRequested = false;
+                    }
 
                     if (!$hasUpload) {
                         if ($removeRequested) {
@@ -235,7 +239,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_reupload'])) {
                                 deleteStoredFileByPath($pdo, $path, $base_path);
                             }
 
-                            flashMessage('Your selected file changes were submitted successfully. The admin will review them shortly.');
+                            flashMessage('Your selected file changes were saved successfully. The previous copies were replaced, and the admin will review them shortly.');
                             header("Location: applications.php");
                             exit();
                         } catch (Throwable $e) {
@@ -256,14 +260,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_reupload'])) {
     }
 }
 
-$page_title = 'Re-upload Files';
+$page_title = 'Update Files';
 include 'header.php';
 displayFlashMessages();
 ?>
 
 <div class="page-header" data-aos="fade-down">
-    <h1 class="fw-bold">Re-upload Files</h1>
-    <p class="text-muted mb-0">Upload only the files that need to be replaced or remove the ones that need to be cleared. Your other application details stay unchanged.</p>
+    <h1 class="fw-bold">Update Files</h1>
+    <p class="text-muted mb-0">Replace or clear only the files that need attention. Your other application details stay unchanged.</p>
 </div>
 
 <?php if (!$application): ?>
@@ -290,7 +294,7 @@ displayFlashMessages();
 
                 <div class="alert alert-warning border-warning">
                     <i class="bi bi-exclamation-triangle-fill me-1"></i>
-                    Upload only the requested PDF files below. The rest of your application stays the same.
+                    Upload only the requested PDF files below.
                 </div>
 
                 <?php if (!empty($request_group['note'])): ?>
@@ -333,21 +337,24 @@ displayFlashMessages();
                                     <div class="card-body">
                                         <div class="d-flex justify-content-between align-items-start gap-3">
                                             <div>
-                                                <div class="fw-bold mb-1"><?php echo htmlspecialchars($docName); ?></div>
+                                                <div class="fw-bold mb-1 text-break"><?php echo htmlspecialchars($docName); ?></div>
+                                                <?php if (!empty($request['created_at'])): ?>
+                                                    <div class="small text-muted mb-1">Requested on <?php echo htmlspecialchars(date('M j, Y g:i A', strtotime($request['created_at']))); ?></div>
+                                                <?php endif; ?>
                                                 <div class="small text-muted">
                                                     <?php if (!empty($currentFile['url'])): ?>
                                                         <a href="<?php echo htmlspecialchars($currentFile['url']); ?>" target="_blank" rel="noopener">Open current file</a>
                                                     <?php else: ?>
-                                                        Current file not available.
+                                                        Current copy unavailable.
                                                     <?php endif; ?>
                                                 </div>
                                             </div>
                                             <span class="badge bg-warning text-dark">Needs re-upload</span>
                                         </div>
                                         <div class="mt-3">
-                                            <label class="form-label fw-bold">Upload replacement PDF</label>
-                                            <input type="file" class="form-control" name="replacement_files[<?php echo (int) $request['request_id']; ?>]" accept=".pdf,application/pdf" required>
-                                            <div class="form-text">PDF only. Upload the clearest copy you have.</div>
+                                            <label class="form-label fw-bold">Replace this file with a PDF</label>
+                                            <input type="file" class="form-control reupload-file-input" name="replacement_files[<?php echo (int) $request['request_id']; ?>]" accept=".pdf,application/pdf" required>
+                                            <div class="form-text">PDF only. This will replace the current file in the same slot.</div>
                                         </div>
                                         <?php if (!empty($request['note'])): ?>
                                             <div class="small text-warning mt-3">
@@ -362,7 +369,7 @@ displayFlashMessages();
 
                     <div class="d-flex gap-2 mt-4">
                         <button type="submit" class="btn btn-warning fw-bold">
-                            <i class="bi bi-upload me-1"></i> Submit Re-upload Files
+                            <i class="bi bi-check2-circle me-1"></i> Save Changes
                         </button>
                         <a href="applications.php" class="btn btn-outline-secondary">Cancel</a>
                     </div>
@@ -401,12 +408,12 @@ displayFlashMessages();
 
                 <div class="alert alert-info border-info">
                     <i class="bi bi-upload me-1"></i>
-                    Your application is under review. You can replace or remove any file below without filling out the full form again.
+                    Your application is under review. You can replace or clear any file below without filling out the full form again.
                 </div>
 
                 <div class="alert alert-light border">
                     <div class="fw-bold mb-1">How this works</div>
-                    <div class="text-muted">Leave any file blank if it does not need to be changed. Use the remove checkbox if you want to clear a file slot first.</div>
+                    <div class="text-muted">Leave any file blank if it does not need to change. Use the clear option if you want to remove a current file first.</div>
                 </div>
 
                 <?php if (!empty($errors)): ?>
@@ -428,7 +435,7 @@ displayFlashMessages();
                         <?php foreach ($application_documents as $document): ?>
                             <?php
                                 $documentId = (int) ($document['id'] ?? 0);
-                                $docName = trim((string) ($document['file_name'] ?? '')) !== '' ? (string) $document['file_name'] : 'Document';
+                                $docName = formatDocumentDisplayName($document['file_name'] ?? '');
                                 $currentPath = $document['file_path'] ?? '';
                                 $currentFile = describeStoredFile($pdo, $currentPath, $base_path);
                                 $currentAvailable = !empty($currentFile['url']);
@@ -438,29 +445,32 @@ displayFlashMessages();
                                     <div class="card-body">
                                         <div class="d-flex justify-content-between align-items-start gap-3">
                                             <div>
-                                                <div class="fw-bold mb-1"><?php echo htmlspecialchars($docName); ?></div>
+                                                <div class="fw-bold mb-1 text-break"><?php echo htmlspecialchars($docName); ?></div>
+                                                <?php if (!empty($document['uploaded_at'])): ?>
+                                                    <div class="small text-muted mb-1">Latest saved <?php echo htmlspecialchars(date('M j, Y g:i A', strtotime($document['uploaded_at']))); ?></div>
+                                                <?php endif; ?>
                                                 <div class="small text-muted">
                                                     <?php if ($currentAvailable): ?>
                                                         <a href="<?php echo htmlspecialchars($currentFile['url']); ?>" target="_blank" rel="noopener">Open current file</a>
                                                     <?php else: ?>
-                                                        Current file not available.
+                                                        Current copy unavailable.
                                                     <?php endif; ?>
                                                 </div>
                                             </div>
                                             <span class="badge bg-info text-dark">Optional replacement</span>
                                         </div>
                                         <div class="mt-3">
-                                            <label class="form-label fw-bold">Upload replacement PDF</label>
-                                            <input type="file" class="form-control" name="replacement_files[<?php echo $documentId; ?>]" accept=".pdf,application/pdf">
-                                            <div class="form-text">Upload only if this file needs to be updated.</div>
+                                            <label class="form-label fw-bold">Replace this file with a PDF</label>
+                                            <input type="file" class="form-control reupload-file-input" name="replacement_files[<?php echo $documentId; ?>]" accept=".pdf,application/pdf">
+                                            <div class="form-text">Upload only if this file needs to change. It will overwrite the current copy.</div>
                                         </div>
                                         <?php if ($currentAvailable): ?>
                                             <div class="form-check mt-3">
-                                                <input class="form-check-input" type="checkbox" name="remove_files[<?php echo $documentId; ?>]" id="remove-file-<?php echo $documentId; ?>" value="1">
+                                                <input class="form-check-input remove-file-toggle" type="checkbox" name="remove_files[<?php echo $documentId; ?>]" id="remove-file-<?php echo $documentId; ?>" value="1">
                                                 <label class="form-check-label fw-semibold text-danger" for="remove-file-<?php echo $documentId; ?>">
-                                                    Remove this file
+                                                    Remove current file
                                                 </label>
-                                                <div class="form-text">Use this if the file is wrong or needs to be cleared before you upload a new one.</div>
+                                                <div class="form-text">Use this if you want to clear the slot before uploading a replacement.</div>
                                             </div>
                                         <?php endif; ?>
                                     </div>
@@ -471,7 +481,7 @@ displayFlashMessages();
 
                     <div class="d-flex gap-2 mt-4">
                         <button type="submit" class="btn btn-info text-dark fw-bold">
-                            <i class="bi bi-upload me-1"></i> Submit Updated Files
+                            <i class="bi bi-check2-circle me-1"></i> Save Changes
                         </button>
                         <a href="applications.php" class="btn btn-outline-secondary">Cancel</a>
                     </div>
@@ -512,5 +522,27 @@ displayFlashMessages();
         </div>
     </div>
 <?php endif; ?>
+
+<script>
+document.addEventListener('change', function (event) {
+    const fileInput = event.target.closest('.reupload-file-input');
+    if (fileInput) {
+        const card = fileInput.closest('.card');
+        const removeToggle = card ? card.querySelector('.remove-file-toggle') : null;
+        if (removeToggle && fileInput.files && fileInput.files.length > 0) {
+            removeToggle.checked = false;
+        }
+    }
+
+    const removeToggle = event.target.closest('.remove-file-toggle');
+    if (removeToggle) {
+        const card = removeToggle.closest('.card');
+        const fileInput = card ? card.querySelector('.reupload-file-input') : null;
+        if (fileInput && removeToggle.checked) {
+            fileInput.value = '';
+        }
+    }
+});
+</script>
 
 <?php include 'footer.php'; ?>

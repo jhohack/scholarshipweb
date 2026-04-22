@@ -28,12 +28,7 @@ function convertGwaToPercentage($gwa) {
 }
 
 function isAcademicPlaceholderValue($value): bool {
-    if ($value === null) {
-        return true;
-    }
-
-    $normalized = strtolower(trim((string)$value));
-    return $normalized === '' || in_array($normalized, ['pending', 'not enrolled', 'incoming', 'incoming student'], true);
+    return $value === null || trim((string) $value) === '';
 }
 
 function getApplicantStatusLabel(array $application): string {
@@ -45,16 +40,15 @@ function getApplicantStatusLabel(array $application): string {
 }
 
 function formatAcademicDisplay(array $application, string $field): string {
+    $value = $application[$field] ?? null;
     if ($field === 'gwa') {
-        $value = $application[$field] ?? null;
-        if (isAcademicPlaceholderValue($value) || !is_numeric($value)) {
+        if (isAcademicPlaceholderValue($value)) {
             return '-';
         }
 
-        return convertGwaToPercentage($value);
+        return is_numeric($value) ? convertGwaToPercentage($value) : (string) $value;
     }
 
-    $value = $application[$field] ?? null;
     if (isAcademicPlaceholderValue($value)) {
         return '-';
     }
@@ -215,7 +209,7 @@ if ($action === 'get_details' && isset($_GET['app_id'])) {
         $responses = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // 3. Documents
-        $stmt = $pdo->prepare("SELECT id, file_name, file_path FROM documents WHERE application_id = ?");
+        $stmt = $pdo->prepare("SELECT id, file_name, file_path, uploaded_at FROM documents WHERE application_id = ?");
         $stmt->execute([$app_id]);
         $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
         foreach ($documents as &$document) {
@@ -224,17 +218,11 @@ if ($action === 'get_details' && isset($_GET['app_id'])) {
             $document['file_exists'] = $fileInfo['exists'];
             $document['file_status'] = $fileInfo['reason'];
             $document['can_replace_missing'] = $fileInfo['reason'] === 'legacy_upload_missing';
+            $document['display_name'] = formatDocumentDisplayName($document['file_name'] ?? '');
         }
         unset($document);
 
-        $stmt = $pdo->prepare("
-            SELECT rr.id as request_id, rr.document_id, rr.note, rr.status, rr.created_at, rr.resolved_at
-            FROM application_reupload_requests rr
-            WHERE rr.application_id = ? AND rr.status = 'pending'
-            ORDER BY rr.created_at DESC, rr.id DESC
-        ");
-        $stmt->execute([$app_id]);
-        $reupload_requests = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $reupload_requests = getDocumentReuploadRequestRows($pdo, null, $app_id);
 
         // 4. Exam Results
         $stmt = $pdo->prepare("
@@ -373,7 +361,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['request_reupload_docu
                 $admin_id,
                 $request_note !== '' ? $request_note : null,
             ]);
-            $created_requests[] = trim((string) ($document['file_name'] ?? 'Document'));
+            $created_requests[] = formatDocumentDisplayName($document['file_name'] ?? '');
         }
 
         if (empty($created_requests)) {
@@ -472,7 +460,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_details'])) {
         $units = ($_POST['units_enrolled'] ?? '') !== '' ? $_POST['units_enrolled'] : null;
         $gwa = ($_POST['gwa'] ?? '') !== '' ? $_POST['gwa'] : null;
         
-        $stmt = $pdo->prepare("UPDATE applications SET program = ?, year_level = ?, units_enrolled = ?, gwa = ?, student_status = ? WHERE id = ?");
+        $stmt = $pdo->prepare("UPDATE applications SET program = ?, year_level = ?, units_enrolled = ?, gwa = ?, student_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
         $stmt->execute([
             trim($prog) !== '' ? trim($prog) : null,
             trim($yl) !== '' ? trim($yl) : null,
@@ -1837,6 +1825,27 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function formatDateTimeDisplay(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) {
+        return '';
+    }
+
+    const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+    const parsed = new Date(normalized);
+    if (Number.isNaN(parsed.getTime())) {
+        return raw;
+    }
+
+    return parsed.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+}
+
 function showApplicationsAlert(message, type = 'success') {
     const container = document.getElementById('applicationsActionAlert');
     if (!container) {
@@ -2391,33 +2400,133 @@ function viewApplicant(appId) {
             document.getElementById('responses-content').innerHTML = respHtml;
 
             // Documents
-            const openRequestMap = {};
-            (data.reupload_requests || []).forEach(req => {
-                openRequestMap[Number(req.document_id || 0)] = req;
+            const latestRequestMap = {};
+            const requestRows = data.reupload_requests || [];
+            requestRows.forEach(req => {
+                const docId = Number(req.document_id || 0);
+                if (docId > 0 && !latestRequestMap[docId]) {
+                    latestRequestMap[docId] = req;
+                }
             });
 
+            const latestRequestValues = Object.values(latestRequestMap);
+            const pendingRequestCount = latestRequestValues.filter(req => (req.request_status || '') === 'pending').length;
+            const completedRequestCount = latestRequestValues.filter(req => (req.request_status || '') === 'completed').length;
+            const closedRequestCount = latestRequestValues.filter(req => (req.request_status || '') === 'cancelled').length;
+
             let docHtml = '';
-            if (isAdminUser && data.documents.length > 0) {
-                const requestableDocs = data.documents.filter(d => !openRequestMap[Number(d.id || 0)]);
+            if (isAdminUser && (pendingRequestCount > 0 || completedRequestCount > 0 || closedRequestCount > 0)) {
+                const statusParts = [];
+                if (pendingRequestCount > 0) {
+                    statusParts.push(`${pendingRequestCount} file${pendingRequestCount === 1 ? '' : 's'} still need re-upload`);
+                }
+                if (completedRequestCount > 0) {
+                    statusParts.push(`${completedRequestCount} file${completedRequestCount === 1 ? '' : 's'} were already re-uploaded`);
+                }
+                if (closedRequestCount > 0) {
+                    statusParts.push(`${closedRequestCount} request${closedRequestCount === 1 ? '' : 's'} are closed`);
+                }
+
                 docHtml += `
                     <div class="col-12">
-                        <form method="POST" action="${escapeHtml(applicationsReturnUrl)}" class="p-3 border rounded-3 bg-light mb-3">
+                        <div class="alert alert-info border-info mb-3 d-flex align-items-start gap-3">
+                            <i class="bi bi-info-circle-fill fs-4"></i>
+                            <div>
+                                <div class="fw-bold mb-1">Re-upload status</div>
+                                <div class="small">${escapeHtml(statusParts.join(' | '))}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            if(data.documents.length > 0) {
+                docHtml += `
+                    <div class="col-12 d-flex align-items-center justify-content-between">
+                        <div class="fw-bold">Current Files</div>
+                        <span class="badge bg-light text-dark">Latest saved files</span>
+                    </div>
+                `;
+
+                data.documents.forEach(d => {
+                    const fileUrl = d.file_url || '#';
+                    const fileName = d.display_name || d.file_name || 'Document';
+                    const encodedUrl = encodeURIComponent(fileUrl);
+                    const encodedTitle = encodeURIComponent(fileName);
+                    const unavailableNote = d.file_status === 'legacy_upload_missing'
+                        ? 'Legacy file missing from current storage.'
+                        : 'File is unavailable.';
+                    const latestRequest = latestRequestMap[Number(d.id || 0)] || null;
+                    const latestStatus = String(latestRequest?.request_status || '').toLowerCase();
+                    const latestUploadLabel = d.uploaded_at ? formatDateTimeDisplay(d.uploaded_at) : '';
+
+                    let requestBadge = '<span class="badge bg-light text-dark">Current file</span>';
+                    let requestMessage = '';
+                    if (latestStatus === 'pending') {
+                        requestBadge = '<span class="badge bg-warning text-dark">Re-upload requested</span>';
+                        requestMessage = `<div class="small text-warning fw-semibold mt-2"><i class="bi bi-chat-square-text me-1"></i>${escapeHtml(latestRequest.note || 'Please re-upload this document.')}</div>`;
+                    } else if (latestStatus === 'completed') {
+                        requestBadge = '<span class="badge bg-success">Re-upload received</span>';
+                        requestMessage = `<div class="small text-success fw-semibold mt-2"><i class="bi bi-check2-circle me-1"></i>Student re-uploaded${latestRequest.resolved_at ? ` on ${escapeHtml(formatDateTimeDisplay(latestRequest.resolved_at))}` : ''}.</div>`;
+                    } else if (latestStatus === 'cancelled') {
+                        requestBadge = '<span class="badge bg-secondary">Request closed</span>';
+                    }
+
+                    docHtml += `
+                        <div class="col-md-6">
+                            <div class="card h-100 ${latestStatus === 'pending' ? 'border-warning shadow-sm' : (latestStatus === 'completed' ? 'border-success shadow-sm' : '')}">
+                                <div class="card-body d-flex align-items-start">
+                                    <i class="bi bi-file-earmark-pdf fs-2 text-danger me-3"></i>
+                                    <div class="flex-grow-1">
+                                        <div class="d-flex align-items-start justify-content-between gap-2">
+                                            <div class="flex-grow-1">
+                                                <div class="fw-bold text-break ${d.file_exists ? 'mb-1' : 'text-muted'}">
+                                                    ${d.file_exists
+                                                        ? `<button type="button" class="btn btn-link p-0 text-start text-decoration-none fw-bold stretched-link document-preview-btn" data-url="${encodedUrl}" data-title="${encodedTitle}">${escapeHtml(fileName)}</button>`
+                                                        : `${escapeHtml(fileName)}`
+                                                    }
+                                                </div>
+                                                ${latestUploadLabel ? `<div class="small text-muted">Latest upload ${escapeHtml(latestUploadLabel)}</div>` : ''}
+                                                ${!d.file_exists ? `<small class="text-warning d-block mt-1">${escapeHtml(unavailableNote)}</small>` : ''}
+                                            </div>
+                                            ${requestBadge}
+                                        </div>
+                                        ${d.file_exists ? '' : (d.can_replace_missing && isAdminUser
+                                            ? `<button type="button" class="btn btn-sm btn-outline-primary mt-2 document-replace-btn" data-document-id="${Number(d.id || 0)}">
+                                                    <i class="bi bi-upload me-1"></i>Upload Replacement PDF
+                                               </button>`
+                                            : '')}
+                                        ${requestMessage}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>`;
+                });
+            } else {
+                docHtml += '<div class="col-12"><p class="text-muted mb-0">No documents uploaded.</p></div>';
+            }
+
+            if (isAdminUser) {
+                const requestableDocs = data.documents.filter(d => (latestRequestMap[Number(d.id || 0)]?.request_status || '') !== 'pending');
+                docHtml += `
+                    <div class="col-12">
+                        <form method="POST" action="${escapeHtml(applicationsReturnUrl)}" class="p-3 border rounded-3 bg-light mt-1">
                             <input type="hidden" name="request_reupload_documents" value="1">
                             <input type="hidden" name="csrf_token" value="${escapeHtml(csrfToken)}">
                             <input type="hidden" name="scholarship_id" value="${Number(app.scholarship_id || 0)}">
                             <input type="hidden" name="application_id" value="${Number(app.id || 0)}">
-                            <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>Request re-upload</div>
-                            <div class="text-muted small mb-3">Select the file or files that need correction. The student will see a focused upload screen for only those documents.</div>
+                            <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>Send Re-upload Request</div>
+                            <div class="text-muted small mb-3">Pick the file or files that need correction. The student will only see the selected documents in their file editor.</div>
                             <div class="row g-2 mb-3">
                                 ${requestableDocs.length > 0 ? requestableDocs.map(d => `
                                     <div class="col-md-6">
                                         <label class="form-check border rounded-3 p-3 h-100 d-block bg-white">
                                             <input class="form-check-input me-2" type="checkbox" name="document_ids[]" value="${Number(d.id || 0)}">
-                                            <span class="fw-semibold d-block">${escapeHtml(d.file_name || 'Document')}</span>
+                                            <span class="fw-semibold d-block text-break">${escapeHtml(d.display_name || d.file_name || 'Document')}</span>
                                             <small class="text-muted">Mark this file for student re-upload.</small>
                                         </label>
                                     </div>
-                                `).join('') : '<div class="col-12"><div class="alert alert-info mb-0">Every document already has an open re-upload request.</div></div>'}
+                                `).join('') : '<div class="col-12"><div class="alert alert-info mb-0">All document requests are already in progress or completed.</div></div>'}
                             </div>
                             <div class="mb-3">
                                 <label class="form-label fw-bold">Request note</label>
@@ -2434,50 +2543,6 @@ function viewApplicant(appId) {
                 `;
             }
 
-            if(data.documents.length > 0) {
-                data.documents.forEach(d => {
-                    const fileUrl = d.file_url || '#';
-                    const fileName = d.file_name || 'Document';
-                    const encodedUrl = encodeURIComponent(fileUrl);
-                    const encodedTitle = encodeURIComponent(fileName);
-                    const unavailableNote = d.file_status === 'legacy_upload_missing'
-                        ? 'Legacy file missing from current storage.'
-                        : 'File is unavailable.';
-                    const openRequest = openRequestMap[Number(d.id || 0)] || null;
-                    docHtml += `
-                        <div class="col-md-6">
-                            <div class="card h-100 ${openRequest ? 'border-warning shadow-sm' : ''}">
-                                <div class="card-body d-flex align-items-start">
-                                    <i class="bi bi-file-earmark-pdf fs-2 text-danger me-3"></i>
-                                    <div class="flex-grow-1">
-                                        <div class="d-flex align-items-start justify-content-between gap-2">
-                                            <div class="flex-grow-1">
-                                                ${d.file_exists
-                                                    ? `<button type="button" class="btn btn-link p-0 text-start text-decoration-none fw-bold stretched-link document-preview-btn" data-url="${encodedUrl}" data-title="${encodedTitle}">${escapeHtml(fileName)}</button>`
-                                                    : `<div class="fw-bold text-muted">${escapeHtml(fileName)}</div>
-                                                       <small class="text-warning d-block">${escapeHtml(unavailableNote)}</small>
-                                                       ${d.can_replace_missing && isAdminUser
-                                                            ? `<button type="button" class="btn btn-sm btn-outline-primary mt-2 document-replace-btn" data-document-id="${Number(d.id || 0)}">
-                                                                    <i class="bi bi-upload me-1"></i>Upload Replacement PDF
-                                                               </button>`
-                                                            : ''}`
-                                                }
-                                            </div>
-                                            ${openRequest ? `<span class="badge bg-warning text-dark">Re-upload requested</span>` : ''}
-                                        </div>
-                                        ${openRequest ? `
-                                            <div class="small text-warning fw-semibold mt-2">
-                                                <i class="bi bi-chat-square-text me-1"></i>${escapeHtml(openRequest.note || 'Please re-upload this document.')}
-                                            </div>
-                                        ` : ''}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>`;
-                });
-            } else {
-                docHtml += '<p class="text-muted">No documents uploaded.</p>';
-            }
             document.getElementById('documents-content').innerHTML = docHtml;
             bindDocumentPreviewButtons();
             bindDocumentReplacementButtons(app.id);

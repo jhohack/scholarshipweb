@@ -237,6 +237,10 @@
     background: linear-gradient(90deg, #198754, #0d6b2d);
 }
 
+.stat-card-info::before {
+    background: linear-gradient(90deg, #0dcaf0, #0a7ea0);
+}
+
 .stat-card-header {
     display: flex;
     justify-content: space-between;

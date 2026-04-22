@@ -45,8 +45,8 @@ if ($action === 'get_user' && isset($_GET['id'])) {
     $user_id = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_NUMBER_INT);
     try {
         $stmt = $pdo->prepare("
-            SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, u.school_id, u.role, u.permissions, u.created_at, u.profile_picture_path,
-                   s.id as student_id, s.phone, s.date_of_birth
+            SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, u.contact_number, u.birthdate, u.school_id, u.role, u.permissions, u.created_at, u.updated_at as user_updated_at, u.profile_picture_path,
+                   s.id as student_id, s.student_name, s.school_id_number as student_school_id_number, s.email as student_email, s.phone, s.date_of_birth, s.phone as student_phone, s.date_of_birth as student_date_of_birth, s.updated_at as student_updated_at
             FROM users u
             LEFT JOIN students s ON u.id = s.user_id
             WHERE u.id = ?
@@ -56,7 +56,12 @@ if ($action === 'get_user' && isset($_GET['id'])) {
 
         if ($user) {
             $user['profile_picture_url'] = storedFilePathToUrl($user['profile_picture_path'] ?? '');
-            $response = ['user' => $user, 'application' => null, 'responses' => []];
+            $response = [
+                'user' => $user,
+                'application' => null,
+                'responses' => [],
+                'sync_state' => buildUserSyncState($user),
+            ];
 
             // If user is a student, fetch latest application info
             if ($user['role'] === 'student' && !empty($user['student_id'])) {
@@ -146,13 +151,8 @@ if ($action === 'check_app_status' && isset($_GET['id'])) {
         if (!$app) {
             echo json_encode(['status' => 'alert', 'message' => 'No scholarship applications found for this student.']);
         } else {
-            if (in_array($app['status'], ['Approved', 'Active'])) {
-                $url = "applications.php?scholarship_id=" . $app['scholarship_id'] . "&search=" . urlencode($student['school_id_number']);
-                echo json_encode(['status' => 'redirect', 'url' => $url]);
-            } else {
-                $msg = "Student " . $student['student_name'] . " has a " . $app['status'] . " application for " . $app['scholarship_name'] . ".";
-                echo json_encode(['status' => 'alert', 'message' => $msg]);
-            }
+            $url = "applications.php?scholarship_id=" . $app['scholarship_id'] . "&search=" . urlencode($student['school_id_number']);
+            echo json_encode(['status' => 'redirect', 'url' => $url]);
         }
     } catch (PDOException $e) {
         echo json_encode(['status' => 'alert', 'message' => 'Database error.']);
@@ -197,6 +197,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $middle_name = trim($_POST['middle_name'] ?? '');
                 $last_name = trim($_POST['last_name'] ?? '');
                 $email = filter_var(trim($_POST['email']), FILTER_SANITIZE_EMAIL);
+                $contact_number = trim($_POST['contact_number'] ?? '');
+                $birthdate = trim($_POST['birthdate'] ?? '');
                 $school_id = trim($_POST['school_id'] ?? '');
                 $role = $_POST['role'];
                 $password = $_POST['password'];
@@ -229,63 +231,76 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                 if (empty($errors)) {
                     $full_name = trim("$first_name $middle_name $last_name");
+                    $contact_number_db = $contact_number !== '' ? $contact_number : null;
+                    $birthdate_db = $birthdate !== '' ? $birthdate : null;
                     
-                    if ($user_id) { // Update
-                        if (!empty($password)) {
-                            $sql = "UPDATE users SET first_name=?, middle_name=?, last_name=?, email=?, school_id=?, role=?, permissions=?, password=? WHERE id=?";
-                            $params = [$first_name, $middle_name, $last_name, $email, !empty($school_id) ? $school_id : null, $role, $permissions, $password, $user_id];
-                        } else {
-                            $sql = "UPDATE users SET first_name=?, middle_name=?, last_name=?, email=?, school_id=?, role=?, permissions=? WHERE id=?";
-                            $params = [$first_name, $middle_name, $last_name, $email, !empty($school_id) ? $school_id : null, $role, $permissions, $user_id];
-                        }
-                        $pdo->prepare($sql)->execute($params);
-                        
-                        // Sync with students table if role is student
-                        if ($role === 'student') {
-                            $check_student = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
-                            $check_student->execute([$user_id]);
-                            if ($check_student->fetch()) {
-                                $update_student = $pdo->prepare("UPDATE students SET student_name = ?, school_id_number = ?, email = ? WHERE user_id = ?");
-                                $update_student->execute([$full_name, $school_id, $email, $user_id]);
+                    $pdo->beginTransaction();
+                    try {
+                        if ($user_id) { // Update
+                            if (!empty($password)) {
+                                $sql = "UPDATE users SET first_name=?, middle_name=?, last_name=?, email=?, contact_number=?, birthdate=?, school_id=?, role=?, permissions=?, password=?, updated_at = CURRENT_TIMESTAMP WHERE id=?";
+                                $params = [$first_name, $middle_name, $last_name, $email, $contact_number_db, $birthdate_db, !empty($school_id) ? $school_id : null, $role, $permissions, $password, $user_id];
                             } else {
-                                // Create if missing
-                                $pdo->prepare("INSERT INTO students (user_id, student_name, school_id_number, email) VALUES (?, ?, ?, ?)")->execute([$user_id, $full_name, $school_id, $email]);
+                                $sql = "UPDATE users SET first_name=?, middle_name=?, last_name=?, email=?, contact_number=?, birthdate=?, school_id=?, role=?, permissions=?, updated_at = CURRENT_TIMESTAMP WHERE id=?";
+                                $params = [$first_name, $middle_name, $last_name, $email, $contact_number_db, $birthdate_db, !empty($school_id) ? $school_id : null, $role, $permissions, $user_id];
                             }
-                        }
-                        $success = "User updated successfully.";
-                    } else { // Create
-                        if (empty($password)) {
-                            $errors[] = "Password is required for new users.";
-                        } else {
-                            // Storing plain text password as requested.
-                            $sql = "INSERT INTO users (first_name, middle_name, last_name, email, school_id, role, permissions, password, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)";
-                            $user_id = dbExecuteInsert(
-                                $pdo,
-                                $sql,
-                                [
-                                    $first_name,
-                                    $middle_name,
-                                    $last_name,
-                                    $email,
-                                    !empty($school_id) ? $school_id : null,
-                                    $role,
-                                    $permissions,
-                                    $password
-                                ]
-                            );
-                            $success = "User created successfully.";
+                            $pdo->prepare($sql)->execute($params);
 
-                            // If the new user is a student, create a corresponding entry in the students table
+                            // Sync with students table if role is student
                             if ($role === 'student') {
-                                $student_insert_stmt = $pdo->prepare(
-                                    "INSERT INTO students (user_id, student_name, school_id_number, email, phone, date_of_birth) VALUES (?, ?, ?, ?, ?, ?)"
+                                $check_student = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
+                                $check_student->execute([$user_id]);
+                                if ($check_student->fetch()) {
+                                    $update_student = $pdo->prepare("UPDATE students SET student_name = ?, school_id_number = ?, email = ?, phone = ?, date_of_birth = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?");
+                                    $update_student->execute([$full_name, !empty($school_id) ? $school_id : null, $email, $contact_number_db, $birthdate_db, $user_id]);
+                                } else {
+                                    // Create if missing
+                                    $pdo->prepare("INSERT INTO students (user_id, student_name, school_id_number, email, phone, date_of_birth, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)")->execute([$user_id, $full_name, !empty($school_id) ? $school_id : null, $email, $contact_number_db, $birthdate_db]);
+                                }
+                            }
+                            $success = "User updated successfully.";
+                        } else { // Create
+                            if (empty($password)) {
+                                $errors[] = "Password is required for new users.";
+                            } else {
+                                // Storing plain text password as requested.
+                                $sql = "INSERT INTO users (first_name, middle_name, last_name, email, contact_number, birthdate, school_id, role, permissions, password, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)";
+                                $user_id = dbExecuteInsert(
+                                    $pdo,
+                                    $sql,
+                                    [
+                                        $first_name,
+                                        $middle_name,
+                                        $last_name,
+                                        $email,
+                                        $contact_number_db,
+                                        $birthdate_db,
+                                        !empty($school_id) ? $school_id : null,
+                                        $role,
+                                        $permissions,
+                                        $password
+                                    ]
                                 );
-                                // We may not have phone/dob, so we insert what we have.
-                                $student_insert_stmt->execute([
-                                    $user_id, $full_name, $school_id, $email, null, null
-                                ]);
+                                $success = "User created successfully.";
+
+                                // If the new user is a student, create a corresponding entry in the students table
+                                if ($role === 'student') {
+                                    $student_insert_stmt = $pdo->prepare(
+                                        "INSERT INTO students (user_id, student_name, school_id_number, email, phone, date_of_birth, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)"
+                                    );
+                                    // We may not have phone/dob, so we insert what we have.
+                                    $student_insert_stmt->execute([
+                                        $user_id, $full_name, !empty($school_id) ? $school_id : null, $email, $contact_number_db, $birthdate_db
+                                    ]);
+                                }
                             }
                         }
+                        $pdo->commit();
+                    } catch (Throwable $transactionError) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        throw $transactionError;
                     }
                 }
             } elseif ($action === 'archive_user' || $action === 'restore_user') {
@@ -354,27 +369,27 @@ $total_active = 0;
 $total_archived = 0;
 
 try {
-    $base_sql = " FROM users";
+    $base_sql = " FROM users u LEFT JOIN students s ON u.id = s.user_id";
     $whereClauses = [];
     $params = [];
 
     if (!empty($search_query)) {
-        $whereClauses[] = "(first_name LIKE :search OR last_name LIKE :search OR school_id LIKE :search)";
+        $whereClauses[] = "(u.first_name LIKE :search OR u.last_name LIKE :search OR u.school_id LIKE :search OR s.student_name LIKE :search OR s.school_id_number LIKE :search)";
         $params['search'] = '%' . $search_query . '%';
     }
     if (!empty($filter_role)) {
-        $whereClauses[] = "role = :role";
+        $whereClauses[] = "u.role = :role";
         $params['role'] = $filter_role;
     }
 
     $where_sql = !empty($whereClauses) ? " AND " . implode(' AND ', $whereClauses) : '';
 
     // Fetch Active Users
-    $count_active_stmt = $pdo->prepare("SELECT COUNT(*) " . $base_sql . " WHERE status = 'active'" . $where_sql);
+    $count_active_stmt = $pdo->prepare("SELECT COUNT(DISTINCT u.id) " . $base_sql . " WHERE u.status = 'active'" . $where_sql);
     $count_active_stmt->execute($params);
     $total_active = (int) $count_active_stmt->fetchColumn();
 
-    $active_stmt = $pdo->prepare("SELECT id, first_name, middle_name, last_name, email, school_id, role, status, created_at, profile_picture_path " . $base_sql . " WHERE status = 'active'" . $where_sql . " ORDER BY created_at DESC LIMIT :limit OFFSET :offset");
+    $active_stmt = $pdo->prepare("SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, u.contact_number, u.birthdate, u.school_id, u.role, u.status, u.created_at, u.updated_at as user_updated_at, u.profile_picture_path, s.id as student_id, s.student_name, s.school_id_number as student_school_id_number, s.email as student_email, s.phone as student_phone, s.date_of_birth as student_date_of_birth, s.updated_at as student_updated_at, CASE WHEN u.role = 'student' AND EXISTS (SELECT 1 FROM students sx JOIN applications a ON a.student_id = sx.id WHERE sx.user_id = u.id) THEN 1 ELSE 0 END AS has_application " . $base_sql . " WHERE u.status = 'active'" . $where_sql . " ORDER BY u.created_at DESC LIMIT :limit OFFSET :offset");
     $active_stmt->bindValue(':limit', $per_page, PDO::PARAM_INT);
     $active_stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     foreach ($params as $key => &$val) {
@@ -384,11 +399,11 @@ try {
     $active_users = $active_stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Fetch Archived Users
-    $count_archived_stmt = $pdo->prepare("SELECT COUNT(*) " . $base_sql . " WHERE status = 'archived'" . $where_sql);
+    $count_archived_stmt = $pdo->prepare("SELECT COUNT(DISTINCT u.id) " . $base_sql . " WHERE u.status = 'archived'" . $where_sql);
     $count_archived_stmt->execute($params);
     $total_archived = (int) $count_archived_stmt->fetchColumn();
 
-    $archived_stmt = $pdo->prepare("SELECT id, first_name, middle_name, last_name, email, school_id, role, status, created_at, profile_picture_path " . $base_sql . " WHERE status = 'archived'" . $where_sql . " ORDER BY created_at DESC LIMIT :limit OFFSET :offset");
+    $archived_stmt = $pdo->prepare("SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, u.contact_number, u.birthdate, u.school_id, u.role, u.status, u.created_at, u.updated_at as user_updated_at, u.profile_picture_path, s.id as student_id, s.student_name, s.school_id_number as student_school_id_number, s.email as student_email, s.phone as student_phone, s.date_of_birth as student_date_of_birth, s.updated_at as student_updated_at, CASE WHEN u.role = 'student' AND EXISTS (SELECT 1 FROM students sx JOIN applications a ON a.student_id = sx.id WHERE sx.user_id = u.id) THEN 1 ELSE 0 END AS has_application " . $base_sql . " WHERE u.status = 'archived'" . $where_sql . " ORDER BY u.created_at DESC LIMIT :limit OFFSET :offset");
     $archived_stmt->bindValue(':limit', $per_page, PDO::PARAM_INT);
     $archived_stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     foreach ($params as $key => &$val) {
@@ -405,6 +420,139 @@ try {
 $page_title = 'User Management';
 $csrf_token = generate_csrf_token();
 
+function normalizeSyncText(?string $value): string
+{
+    $value = trim((string) $value);
+    $value = preg_replace('/\s+/', ' ', $value);
+    return function_exists('mb_strtolower') ? mb_strtolower($value) : strtolower($value);
+}
+
+function formatSyncTimestamp(?string $timestamp): string
+{
+    $timestamp = trim((string) $timestamp);
+    if ($timestamp === '') {
+        return '';
+    }
+
+    $time = strtotime($timestamp);
+    if ($time === false) {
+        return '';
+    }
+
+    return date('M d, Y g:i A', $time);
+}
+
+function renderUserApplicationBadge(array $user): string
+{
+    if (($user['role'] ?? '') !== 'student') {
+        return '<span class="badge rounded-pill bg-light text-secondary border">N/A</span>';
+    }
+
+    if (!empty($user['has_application'])) {
+        return '<span class="badge rounded-pill bg-success-subtle text-success border border-success-subtle">Has Application</span>';
+    }
+
+    return '<span class="badge rounded-pill bg-secondary-subtle text-secondary border border-secondary-subtle">No Application</span>';
+}
+
+function buildUserSyncState(array $user): array
+{
+    $role = $user['role'] ?? '';
+    $lastUpdated = $role === 'student'
+        ? ($user['student_updated_at'] ?? $user['user_updated_at'] ?? $user['created_at'] ?? null)
+        : ($user['user_updated_at'] ?? $user['created_at'] ?? null);
+
+    if ($role !== 'student') {
+        return [
+            'status' => 'account_only',
+            'label' => 'Account only',
+            'detail' => 'This account has no linked student profile.',
+            'last_updated' => formatSyncTimestamp($lastUpdated),
+            'badge_class' => 'bg-light text-secondary border',
+        ];
+    }
+
+    if (empty($user['student_id'])) {
+        return [
+            'status' => 'unlinked',
+            'label' => 'Unlinked',
+            'detail' => 'No student record is linked to this account yet.',
+            'last_updated' => formatSyncTimestamp($lastUpdated),
+            'badge_class' => 'bg-danger-subtle text-danger border border-danger-subtle',
+        ];
+    }
+
+    $mismatches = [];
+    $expected_name = normalizeSyncText(trim(implode(' ', array_filter([
+        $user['first_name'] ?? '',
+        $user['middle_name'] ?? '',
+        $user['last_name'] ?? '',
+    ]))));
+    $student_name = normalizeSyncText($user['student_name'] ?? '');
+    if (($expected_name !== '' || $student_name !== '') && $expected_name !== $student_name) {
+        $mismatches[] = 'Name';
+    }
+
+    $user_email = normalizeSyncText($user['email'] ?? '');
+    $student_email = normalizeSyncText($user['student_email'] ?? '');
+    if (($user_email !== '' || $student_email !== '') && $user_email !== $student_email) {
+        $mismatches[] = 'Email';
+    }
+
+    $user_school_id = normalizeSyncText($user['school_id'] ?? '');
+    $student_school_id = normalizeSyncText($user['student_school_id_number'] ?? '');
+    if (($user_school_id !== '' || $student_school_id !== '') && $user_school_id !== $student_school_id) {
+        $mismatches[] = 'School ID';
+    }
+
+    $user_phone = normalizeSyncText($user['contact_number'] ?? '');
+    $student_phone = normalizeSyncText($user['student_phone'] ?? '');
+    if (($user_phone !== '' || $student_phone !== '') && $user_phone !== $student_phone) {
+        $mismatches[] = 'Phone';
+    }
+
+    $user_birthdate = normalizeSyncText($user['birthdate'] ?? '');
+    $student_birthdate = normalizeSyncText($user['student_date_of_birth'] ?? '');
+    if (($user_birthdate !== '' || $student_birthdate !== '') && $user_birthdate !== $student_birthdate) {
+        $mismatches[] = 'Birthdate';
+    }
+
+    if (empty($mismatches)) {
+        return [
+            'status' => 'in_sync',
+            'label' => 'In Sync',
+            'detail' => 'Account and student profile match.',
+            'last_updated' => formatSyncTimestamp($lastUpdated),
+            'badge_class' => 'bg-success-subtle text-success border border-success-subtle',
+        ];
+    }
+
+    return [
+        'status' => 'needs_review',
+        'label' => 'Needs Review',
+        'detail' => 'Mismatch: ' . implode(', ', array_slice($mismatches, 0, 3)) . (count($mismatches) > 3 ? ' +' . (count($mismatches) - 3) . ' more' : ''),
+        'last_updated' => formatSyncTimestamp($lastUpdated),
+        'badge_class' => 'bg-warning-subtle text-warning border border-warning-subtle',
+    ];
+}
+
+function renderUserStatusCell(array $user): string
+{
+    $appBadge = renderUserApplicationBadge($user);
+    $sync = buildUserSyncState($user);
+    $syncBadge = '<span class="badge rounded-pill ' . htmlspecialchars($sync['badge_class']) . '">' . htmlspecialchars($sync['label']) . '</span>';
+    $detail = htmlspecialchars($sync['detail']);
+    $lastUpdated = $sync['last_updated'] !== '' ? '<small class="text-muted d-block">Last updated ' . htmlspecialchars($sync['last_updated']) . '</small>' : '';
+
+    return '
+        <div class="d-flex flex-column gap-1">
+            <div class="d-flex flex-wrap gap-1 align-items-center">' . $appBadge . $syncBadge . '</div>
+            <small class="text-muted">' . $detail . '</small>
+            ' . $lastUpdated . '
+        </div>
+    ';
+}
+
 // --- AJAX Response for Live Search ---
 if (isset($_GET['ajax'])) {
     header('Content-Type: application/json');
@@ -412,7 +560,7 @@ if (isset($_GET['ajax'])) {
     // Generate Active Users Table HTML
     ob_start();
     if (empty($active_users)): ?>
-        <tr><td colspan="6" class="text-center text-muted py-4">No active users found.</td></tr>
+        <tr><td colspan="7" class="text-center text-muted py-4">No active users found.</td></tr>
     <?php else: ?>
         <?php foreach ($active_users as $user): ?>
             <tr>
@@ -430,6 +578,7 @@ if (isset($_GET['ajax'])) {
                 <td><span class="font-monospace"><?php echo htmlspecialchars($user['school_id'] ?? ''); ?></span></td>
                 <td><span class="text-muted"><?php echo htmlspecialchars($user['email']); ?></span></td>
                 <td><span class="badge bg-info-soft text-info text-uppercase"><?php echo htmlspecialchars($user['role']); ?></span></td>
+                <td><?php echo renderUserStatusCell($user); ?></td>
                 <td class="text-end" style="width: 120px;">
                     <div class="dropdown">
                         <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" data-bs-strategy="fixed">
@@ -438,7 +587,7 @@ if (isset($_GET['ajax'])) {
                         <ul class="dropdown-menu dropdown-menu-end">
                             <?php if ($user['role'] === 'student'): ?>
                                 <li><button type="button" class="dropdown-item view-profile-btn" data-user-id="<?php echo $user['id']; ?>"><i class="bi bi-person-lines-fill me-2"></i>View Profile</button></li>
-                                <li><a class="dropdown-item view-app-btn" href="#" data-user-id="<?php echo $user['id']; ?>"><i class="bi bi-file-earmark-text me-2"></i>View Applications</a></li>
+                                <li><button type="button" class="dropdown-item view-app-btn" data-user-id="<?php echo $user['id']; ?>"><i class="bi bi-file-earmark-text me-2"></i>View Applications</button></li>
                             <?php endif; ?>
                             <li><button type="button" class="dropdown-item edit-user-btn" data-user-id="<?php echo $user['id']; ?>"><i class="bi bi-pencil-fill me-2"></i>Edit</button></li>
                             <li><hr class="dropdown-divider"></li>
@@ -460,7 +609,7 @@ if (isset($_GET['ajax'])) {
     // Generate Archived Users Table HTML
     ob_start();
     if (empty($archived_users)): ?>
-        <tr><td colspan="6" class="text-center text-muted py-4">No archived users found.</td></tr>
+        <tr><td colspan="7" class="text-center text-muted py-4">No archived users found.</td></tr>
     <?php else: ?>
         <?php foreach ($archived_users as $user): ?>
             <tr class="text-muted">
@@ -478,6 +627,7 @@ if (isset($_GET['ajax'])) {
                 <td><span class="font-monospace"><?php echo htmlspecialchars($user['school_id'] ?? ''); ?></span></td>
                 <td><?php echo htmlspecialchars($user['email']); ?></td>
                 <td><span class="badge bg-secondary-soft text-secondary text-uppercase"><?php echo htmlspecialchars($user['role']); ?></span></td>
+                            <td><?php echo renderUserStatusCell($user); ?></td>
                 <td class="text-end">
                     <form action="users.php" method="post" onsubmit="return confirm('Are you sure you want to restore this user?');" style="display:inline;">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
@@ -608,12 +758,13 @@ include 'header.php'; // This includes the sidebar and main layout
                     <th>School ID</th>
                     <th>Email</th>
                     <th>Role</th>
+                    <th>Status</th>
                     <th class="text-end">Actions</th>
                 </tr>
             </thead>
             <tbody id="activeUsersTableBody">
                 <?php if (empty($active_users)): ?>
-                    <tr><td colspan="5" class="text-center text-muted py-4">No active users found.</td></tr>
+                    <tr><td colspan="7" class="text-center text-muted py-4">No active users found.</td></tr>
                 <?php else: ?>
                     <?php foreach ($active_users as $user): ?>
                         <tr>
@@ -631,6 +782,7 @@ include 'header.php'; // This includes the sidebar and main layout
                             <td><span class="font-monospace"><?php echo htmlspecialchars($user['school_id'] ?? ''); ?></span></td>
                             <td><span class="text-muted"><?php echo htmlspecialchars($user['email']); ?></span></td>
                             <td><span class="badge bg-info-soft text-info text-uppercase"><?php echo htmlspecialchars($user['role']); ?></span></td>
+                            <td><?php echo renderUserStatusCell($user); ?></td>
                             <td class="text-end" style="width: 120px;">
                                 <div class="dropdown">
                                     <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" data-bs-strategy="fixed">
@@ -639,7 +791,7 @@ include 'header.php'; // This includes the sidebar and main layout
                                     <ul class="dropdown-menu dropdown-menu-end">
                                         <?php if ($user['role'] === 'student'): ?>
                                             <li><button type="button" class="dropdown-item view-profile-btn" data-user-id="<?php echo $user['id']; ?>"><i class="bi bi-person-lines-fill me-2"></i>View Profile</button></li>
-                                            <li><a class="dropdown-item view-app-btn" href="#" data-user-id="<?php echo $user['id']; ?>"><i class="bi bi-file-earmark-text me-2"></i>View Applications</a></li>
+                                            <li><button type="button" class="dropdown-item view-app-btn" data-user-id="<?php echo $user['id']; ?>"><i class="bi bi-file-earmark-text me-2"></i>View Applications</button></li>
                                         <?php endif; ?>
                                         <?php if (isAdmin()): ?>
                                         <li><button type="button" class="dropdown-item edit-user-btn" data-user-id="<?php echo $user['id']; ?>"><i class="bi bi-pencil-fill me-2"></i>Edit</button></li>
@@ -682,12 +834,13 @@ include 'header.php'; // This includes the sidebar and main layout
                     <th>School ID</th>
                     <th>Email</th>
                     <th>Role</th>
+                    <th>Status</th>
                     <th class="text-end">Actions</th>
                 </tr>
             </thead>
             <tbody id="archivedUsersTableBody">
                 <?php if (empty($archived_users)): ?>
-                    <tr><td colspan="5" class="text-center text-muted py-4">No archived users found.</td></tr>
+                    <tr><td colspan="7" class="text-center text-muted py-4">No archived users found.</td></tr>
                 <?php else: ?>
                     <?php foreach ($archived_users as $user): ?>
                         <tr class="text-muted">
@@ -705,6 +858,7 @@ include 'header.php'; // This includes the sidebar and main layout
                             <td><span class="font-monospace"><?php echo htmlspecialchars($user['school_id'] ?? ''); ?></span></td>
                             <td><?php echo htmlspecialchars($user['email']); ?></td>
                             <td><span class="badge bg-secondary-soft text-secondary text-uppercase"><?php echo htmlspecialchars($user['role']); ?></span></td>
+                            <td><?php echo renderUserStatusCell($user); ?></td>
                             <td class="text-end">
                                 <?php if (isAdmin()): ?>
                                 <form action="users.php" method="post" onsubmit="return confirm('Are you sure you want to restore this user?');" style="display:inline;">
@@ -748,6 +902,13 @@ include 'header.php'; // This includes the sidebar and main layout
                     <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                     <input type="hidden" name="action" value="save_user">
                     <input type="hidden" name="user_id" id="user_id">
+                    <div id="edit_user_sync_summary" class="alert alert-light border d-flex flex-column gap-1 mb-4">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge rounded-pill bg-secondary-subtle text-secondary border border-secondary-subtle">Sync</span>
+                            <strong class="text-dark">Select a student to see sync details.</strong>
+                        </div>
+                        <small class="text-muted">The admin Users page keeps the account and student profile aligned.</small>
+                    </div>
                     <div class="row g-3">
                         <div class="col-md-4">
                             <label for="first_name" class="form-label">First Name</label>
@@ -764,6 +925,14 @@ include 'header.php'; // This includes the sidebar and main layout
                         <div class="col-md-6">
                             <label for="email" class="form-label">Email Address</label>
                             <input type="email" class="form-control" id="email" name="email" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="contact_number" class="form-label">Phone Number</label>
+                            <input type="tel" class="form-control" id="contact_number" name="contact_number" placeholder="09xxxxxxxxx">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="birthdate" class="form-label">Birthdate</label>
+                            <input type="date" class="form-control" id="birthdate" name="birthdate">
                         </div>
                         <div class="col-md-6">
                             <label for="school_id" class="form-label">School ID</label>
@@ -849,6 +1018,15 @@ include 'header.php'; // This includes the sidebar and main layout
                                 <div class="mb-2 d-flex align-items-center"><i class="bi bi-calendar-event me-3 opacity-75 fs-5"></i><span class="small">Born: <span id="view_dob"></span></span></div>
                                 <div class="d-flex align-items-center"><i class="bi bi-clock-history me-3 opacity-75 fs-5"></i><span class="small">Joined: <span id="view_created_at"></span></span></div>
                             </div>
+
+                            <div class="p-3 bg-white bg-opacity-10 rounded" id="view_user_sync_summary">
+                                <label class="small text-uppercase opacity-75 fw-bold d-block mb-1">Profile Sync</label>
+                                <div class="d-flex align-items-center gap-2 flex-wrap">
+                                    <span class="badge bg-white text-primary" id="view_sync_badge">Loading...</span>
+                                </div>
+                                <div class="small mt-2 opacity-75" id="view_sync_detail">Waiting for user data.</div>
+                                <div class="small opacity-75 mt-1" id="view_sync_updated"></div>
+                            </div>
                         </div>
                     </div>
                     
@@ -899,12 +1077,33 @@ document.addEventListener('DOMContentLoaded', function() {
     const middleNameInput = document.getElementById('middle_name');
     const lastNameInput = document.getElementById('last_name');
     const emailInput = document.getElementById('email');
+    const contactNumberInput = document.getElementById('contact_number');
+    const birthdateInput = document.getElementById('birthdate');
     const schoolIdInput = document.getElementById('school_id');
     const roleInput = document.getElementById('role');
     const passwordContainer = document.getElementById('password-field-container');
     const passwordInput = document.getElementById('password');
     const passwordHelpText = document.getElementById('password-help-text');
     const staffPermissionsContainer = document.getElementById('staff-permissions-container');
+    const editSyncSummary = document.getElementById('edit_user_sync_summary');
+    const viewSyncBadge = document.getElementById('view_sync_badge');
+    const viewSyncDetail = document.getElementById('view_sync_detail');
+    const viewSyncUpdated = document.getElementById('view_sync_updated');
+
+    function renderSyncSummary(syncState) {
+        const label = syncState?.label || 'Sync';
+        const detail = syncState?.detail || 'No sync data available.';
+        const updated = syncState?.last_updated ? `Last updated ${syncState.last_updated}` : '';
+        const badgeClass = syncState?.badge_class || 'bg-secondary-subtle text-secondary border border-secondary-subtle';
+
+        return `
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <span class="badge rounded-pill ${badgeClass}">${label}</span>
+                <strong class="text-dark">${detail}</strong>
+            </div>
+            ${updated ? `<small class="text-muted">${updated}</small>` : ''}
+        `;
+    }
 
 
     // Handle role change to toggle school_id requirement
@@ -923,6 +1122,17 @@ document.addEventListener('DOMContentLoaded', function() {
         passwordHelpText.style.display = 'none';
         schoolIdInput.required = roleInput.value === 'student'; // Set requirement based on default role
         staffPermissionsContainer.style.display = 'none';
+        if (editSyncSummary) {
+            editSyncSummary.innerHTML = `
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge rounded-pill bg-secondary-subtle text-secondary border border-secondary-subtle">Sync</span>
+                    <strong class="text-dark">New user profile.</strong>
+                </div>
+                <small class="text-muted">Student details will be linked when you save the record.</small>
+            `;
+        }
+        if (contactNumberInput) contactNumberInput.value = '';
+        if (birthdateInput) birthdateInput.value = '';
         document.querySelectorAll('.permission-cb').forEach(cb => cb.checked = false);
         userModal.show();
     });
@@ -949,12 +1159,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     middleNameInput.value = data.user.middle_name;
                     lastNameInput.value = data.user.last_name;
                     emailInput.value = data.user.email;
-                    schoolIdInput.value = data.user.school_id;
+                    if (contactNumberInput) contactNumberInput.value = data.user.contact_number || data.user.student_phone || data.user.phone || '';
+                    if (birthdateInput) birthdateInput.value = data.user.birthdate || data.user.student_date_of_birth || data.user.date_of_birth || '';
+                    schoolIdInput.value = data.user.school_id || data.user.student_school_id_number || '';
                     roleInput.value = data.user.role;
                     passwordContainer.style.display = 'block'; // Or you can hide it for edits
                     passwordInput.required = false;
                     passwordHelpText.style.display = 'block';
                     schoolIdInput.required = data.user.role === 'student';
+                    if (editSyncSummary) {
+                        editSyncSummary.innerHTML = renderSyncSummary(data.sync_state);
+                    }
                     
                     // Handle Permissions
                     staffPermissionsContainer.style.display = (data.user.role === 'staff') ? 'block' : 'none';
@@ -989,6 +1204,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const user = data.user;
                     const app = data.application;
                     const responses = data.responses;
+                    const syncState = data.sync_state || {};
 
                     // Populate profile picture
                     const picContainer = document.getElementById('view_profile_picture_container');
@@ -1002,11 +1218,22 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Populate the view modal
                     document.getElementById('view_full_name').textContent = `${user.first_name} ${user.middle_name || ''} ${user.last_name}`;
                     document.getElementById('view_role').textContent = user.role;
-                    document.getElementById('view_school_id').textContent = user.school_id || 'N/A';
+                    document.getElementById('view_school_id').textContent = user.school_id || user.student_school_id_number || 'N/A';
                     document.getElementById('view_created_at').textContent = new Date(user.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-                    document.getElementById('view_email').textContent = user.email;
-                    document.getElementById('view_phone').textContent = user.phone || 'Not provided';
-                    document.getElementById('view_dob').textContent = user.date_of_birth ? new Date(user.date_of_birth).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Not provided';
+                    document.getElementById('view_email').textContent = user.email || user.student_email || 'Not provided';
+                    document.getElementById('view_phone').textContent = user.contact_number || user.student_phone || user.phone || 'Not provided';
+                    const birthdateValue = user.birthdate || user.student_date_of_birth || user.date_of_birth || '';
+                    document.getElementById('view_dob').textContent = birthdateValue ? new Date(birthdateValue).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Not provided';
+                    if (viewSyncBadge) {
+                        viewSyncBadge.className = `badge rounded-pill ${syncState.badge_class || 'bg-white text-primary'}`;
+                        viewSyncBadge.textContent = syncState.label || 'Sync';
+                    }
+                    if (viewSyncDetail) {
+                        viewSyncDetail.textContent = syncState.detail || 'No sync data available.';
+                    }
+                    if (viewSyncUpdated) {
+                        viewSyncUpdated.textContent = syncState.last_updated ? `Last updated ${syncState.last_updated}` : '';
+                    }
                     
                     // Populate Application Details
                     const appContainer = document.getElementById('application_details_container');
@@ -1078,7 +1305,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const viewAppBtn = event.target.closest('.view-app-btn');
         if (viewAppBtn) {
             event.preventDefault();
-            const userId = this.getAttribute('data-user-id');
+            const userId = viewAppBtn.getAttribute('data-user-id');
+            if (!userId) {
+                alert('Unable to open applications for this user.');
+                return;
+            }
             
             fetch(`users.php?action=check_app_status&id=${userId}`)
                 .then(response => response.json())
@@ -1086,12 +1317,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (data.status === 'redirect') {
                         window.location.href = data.url;
                     } else {
-                        alert(data.message);
+                        alert(data.message || 'No application is available for this user.');
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    alert('An error occurred while checking application status.');
+                    alert('An error occurred while checking application status. Please try again.');
                 });
         }
     });

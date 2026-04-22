@@ -445,6 +445,20 @@ if (!function_exists('dbEnsureScholarshipColumns')) {
     }
 }
 
+if (!function_exists('dbEnsureUserStudentSyncSchema')) {
+    function dbEnsureUserStudentSyncSchema(PDO $pdo): void
+    {
+        dbAddColumnIfMissing($pdo, 'users', 'contact_number', 'VARCHAR(50) NULL DEFAULT NULL');
+        dbAddColumnIfMissing($pdo, 'users', 'birthdate', 'DATE NULL DEFAULT NULL');
+        dbAddColumnIfMissing($pdo, 'users', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
+
+        dbAddColumnIfMissing($pdo, 'students', 'email', 'VARCHAR(255) NULL DEFAULT NULL');
+        dbAddColumnIfMissing($pdo, 'students', 'phone', 'VARCHAR(50) NULL DEFAULT NULL');
+        dbAddColumnIfMissing($pdo, 'students', 'date_of_birth', 'DATE NULL DEFAULT NULL');
+        dbAddColumnIfMissing($pdo, 'students', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
+    }
+}
+
 if (!function_exists('dbEnsureNotificationsTable')) {
     function dbEnsureNotificationsTable(PDO $pdo): void
     {

@@ -41,19 +41,7 @@ try {
         $applications = [];
     }
 
-    $open_reupload_requests = $student_id ? getOpenDocumentReuploadRequests($pdo, (int) $student_id) : [];
-    $reupload_request_map = [];
-    foreach ($open_reupload_requests as $request_group) {
-        $reupload_request_map[(int) ($request_group['application_id'] ?? 0)] = $request_group;
-    }
-
-    $under_review_application = null;
-    foreach ($applications as $application) {
-        if (strcasecmp((string) ($application['status'] ?? ''), 'Under Review') === 0) {
-            $under_review_application = $application;
-            break;
-        }
-    }
+    $review_action = $student_id ? getStudentReviewAction($pdo, (int) $student_id) : null;
 } catch (PDOException $e) {
     $applications = [];
     // Log the error in production
@@ -74,34 +62,28 @@ include 'header.php';
         <h3 class="mb-0">Application History</h3>
         <span class="badge bg-primary-soft text-primary fs-6 rounded-pill"><?php echo count($applications); ?> Applications</span>
     </div>
-    <?php if (!empty($open_reupload_requests)): ?>
-        <?php $primary_request = $open_reupload_requests[0]; ?>
-        <div class="alert alert-warning border-warning shadow-sm d-flex align-items-start gap-3">
-            <div class="fs-3 lh-1"><i class="bi bi-exclamation-triangle-fill"></i></div>
+    <?php if (!empty($review_action)): ?>
+        <?php
+            $review_alert_class = $review_action['mode'] === 'request' ? 'alert-warning border-warning' : 'alert-info border-info';
+            $review_icon_class = $review_action['mode'] === 'request' ? 'bi-exclamation-triangle-fill' : 'bi-hourglass-split';
+        ?>
+        <div class="alert <?php echo $review_alert_class; ?> shadow-sm d-flex align-items-start gap-3">
+            <div class="fs-3 lh-1"><i class="bi <?php echo $review_icon_class; ?>"></i></div>
             <div class="flex-grow-1">
-                <div class="fw-bold mb-1">Action Required</div>
+                <div class="fw-bold mb-1"><?php echo $review_action['mode'] === 'request' ? 'Action Required' : 'Under Review'; ?></div>
                 <div class="mb-2">
-                    <?php echo htmlspecialchars($primary_request['scholarship_name'] ?? 'Your application'); ?> needs <?php echo (int) ($primary_request['count'] ?? 0); ?> file<?php echo ((int) ($primary_request['count'] ?? 0) === 1) ? '' : 's'; ?> re-uploaded.
+                    <?php if ($review_action['mode'] === 'request'): ?>
+                        <?php echo htmlspecialchars($review_action['scholarship_name'] ?? 'Your application'); ?> needs <?php echo (int) ($review_action['count'] ?? 0); ?> file<?php echo ((int) ($review_action['count'] ?? 0) === 1) ? '' : 's'; ?> updated.
+                    <?php else: ?>
+                        <?php echo htmlspecialchars($review_action['scholarship_name'] ?? 'Your application'); ?> is currently under review.
+                    <?php endif; ?>
                 </div>
-                <div class="small text-dark mb-2">Only upload the files listed by the admin. You can also remove a file first if it needs to be cleared. You do not need to submit the whole application again.</div>
-                <?php if (!empty($primary_request['note'])): ?>
-                    <div class="small text-dark mb-2"><strong>Note:</strong> <?php echo htmlspecialchars($primary_request['note']); ?></div>
+                <div class="small text-dark mb-2">Open the file editor to replace or clear a file without filling out the whole form again.</div>
+                <?php if ($review_action['mode'] === 'request' && !empty($review_action['note'])): ?>
+                    <div class="small text-dark mb-2"><strong>Note:</strong> <?php echo htmlspecialchars($review_action['note']); ?></div>
                 <?php endif; ?>
-                <a href="reupload-document.php?application_id=<?php echo (int) ($primary_request['application_id'] ?? 0); ?>" class="btn btn-warning fw-bold">
-                    <i class="bi bi-upload me-2"></i>Re-upload files
-                </a>
-            </div>
-        </div>
-    <?php elseif (!empty($under_review_application)): ?>
-        <div class="alert alert-info border-info shadow-sm d-flex align-items-start gap-3">
-            <div class="fs-3 lh-1"><i class="bi bi-upload"></i></div>
-            <div class="flex-grow-1">
-                <div class="fw-bold mb-1">Under Review</div>
-                <div class="mb-2">
-                    <?php echo htmlspecialchars($under_review_application['scholarship_name'] ?? 'Your application'); ?> is under review. If a file needs fixing, you can replace it here without filling out the whole form again.
-                </div>
-                <a href="reupload-document.php?application_id=<?php echo (int) ($under_review_application['id'] ?? 0); ?>" class="btn btn-info fw-bold text-dark">
-                    <i class="bi bi-upload me-2"></i>Re-upload files
+                <a href="reupload-document.php?application_id=<?php echo (int) ($review_action['application_id'] ?? 0); ?>" class="btn btn-outline-primary fw-bold">
+                    <i class="bi bi-folder2-open me-2"></i>Open file editor
                 </a>
             </div>
         </div>
@@ -121,13 +103,15 @@ include 'header.php';
                         <th>Scholarship Name</th>
                         <th>Submitted On</th>
                         <th class="text-center">Status</th>
-                        <th class="text-center">Action</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($applications as $application): ?>
-                        <?php $reupload_request = $reupload_request_map[(int) $application['id']] ?? null; ?>
-                        <tr class="<?php echo $reupload_request ? 'table-warning-subtle' : (strcasecmp((string) ($application['status'] ?? ''), 'Under Review') === 0 ? 'table-info-subtle' : ''); ?>">
+                        <?php
+                            $is_review_action_row = !empty($review_action) && (int) ($review_action['application_id'] ?? 0) === (int) $application['id'];
+                            $is_under_review = strcasecmp((string) ($application['status'] ?? ''), 'Under Review') === 0;
+                        ?>
+                        <tr class="<?php echo $is_review_action_row ? ($review_action['mode'] === 'request' ? 'table-warning-subtle' : 'table-info-subtle') : ($is_under_review ? 'table-info-subtle' : ''); ?>">
                             <?php
                             // Standardize the status display for the user using the global function
                             $display_status = formatApplicationStatus($application['status']);
@@ -162,29 +146,14 @@ include 'header.php';
                             <td class="text-muted"><?php echo htmlspecialchars(date('F j, Y', strtotime($application['submitted_at']))); ?></td>
                             <td class="text-center">
                                 <span class="badge <?php echo $badge_bg; ?>"><i class="bi <?php echo $icon_class; ?> me-1"></i><?php echo htmlspecialchars($display_status); ?></span>
-                                <?php if ($reupload_request): ?>
+                                <?php if ($is_review_action_row && $review_action['mode'] === 'request'): ?>
                                     <div class="mt-2">
                                         <span class="badge bg-warning text-dark">Action Required</span>
                                     </div>
-                                <?php elseif (strcasecmp((string) ($application['status'] ?? ''), 'Under Review') === 0): ?>
+                                <?php elseif ($is_review_action_row && $review_action['mode'] === 'review'): ?>
                                     <div class="mt-2">
-                                        <span class="badge bg-info text-dark">Re-upload available</span>
+                                        <span class="badge bg-info text-dark">File editor available</span>
                                     </div>
-                                <?php endif; ?>
-                            </td>
-                            <td class="text-center">
-                                <?php if ($reupload_request): ?>
-                                    <a href="reupload-document.php?application_id=<?php echo (int) $application['id']; ?>" class="btn btn-sm btn-warning fw-bold">
-                                        <i class="bi bi-upload me-1"></i> Re-upload
-                                    </a>
-                                    <div class="small text-muted mt-2"><?php echo (int) ($reupload_request['count'] ?? 0); ?> file<?php echo ((int) ($reupload_request['count'] ?? 0) === 1) ? '' : 's'; ?> needed</div>
-                                <?php elseif (strcasecmp((string) ($application['status'] ?? ''), 'Under Review') === 0): ?>
-                                    <a href="reupload-document.php?application_id=<?php echo (int) $application['id']; ?>" class="btn btn-sm btn-info fw-bold text-dark">
-                                        <i class="bi bi-upload me-1"></i> Re-upload files
-                                    </a>
-                                    <div class="small text-muted mt-2">Replace or remove any file that needs correction.</div>
-                                <?php else: ?>
-                                    <span class="text-muted">-</span>
                                 <?php endif; ?>
                             </td>
                         </tr>

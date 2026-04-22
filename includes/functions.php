@@ -255,6 +255,168 @@ function getStudentApplications($pdo, $user_id) {
 }
 
 /**
+ * Turn a stored filename into a cleaner human-readable label.
+ *
+ * @param string|null $file_name
+ * @param string $fallback
+ * @return string
+ */
+if (!function_exists('formatDocumentDisplayName')) {
+    function formatDocumentDisplayName(?string $file_name, string $fallback = 'Document'): string
+    {
+        $raw = trim((string) $file_name);
+        if ($raw === '') {
+            return $fallback;
+        }
+
+        $base = trim((string) pathinfo($raw, PATHINFO_FILENAME));
+        if ($base === '') {
+            return $fallback;
+        }
+
+        $tokens = preg_split('/[._\-\s]+/', $base, -1, PREG_SPLIT_NO_EMPTY);
+        if (empty($tokens)) {
+            return $fallback;
+        }
+
+        $cleanTokens = [];
+        $started = false;
+        foreach ($tokens as $token) {
+            $normalized = preg_replace('/[^a-z0-9]/i', '', (string) $token);
+            if ($normalized === '') {
+                continue;
+            }
+
+            if (!$started) {
+                $looksLikeNoise = preg_match('/^(doc|document|file|scan|upload|img|image)$/i', $normalized)
+                    || preg_match('/^\d+$/', $normalized)
+                    || preg_match('/^[a-f0-9]{8,}$/i', $normalized);
+
+                if ($looksLikeNoise) {
+                    continue;
+                }
+
+                $started = true;
+            }
+
+            $cleanTokens[] = $token;
+        }
+
+        if (empty($cleanTokens)) {
+            return $fallback;
+        }
+
+        $display = trim(preg_replace('/\s+/', ' ', implode(' ', $cleanTokens)) ?? '');
+        if ($display === '') {
+            return $fallback;
+        }
+
+        if (function_exists('mb_convert_case')) {
+            $display = mb_convert_case($display, MB_CASE_TITLE, 'UTF-8');
+        } else {
+            $display = ucwords(strtolower($display));
+        }
+
+        $acronyms = ['IT', 'GWA', 'PDF', 'BS', 'BEED', 'BA', 'AB', 'SHS', 'JHS', 'TVL', 'STEM', 'ICT', 'NSTP'];
+        foreach ($acronyms as $acronym) {
+            $display = preg_replace(
+                '/\b' . preg_quote(ucfirst(strtolower($acronym)), '/') . '\b/u',
+                $acronym,
+                $display
+            ) ?? $display;
+        }
+
+        $display = trim(preg_replace('/\s+/', ' ', $display) ?? '');
+        if ($display === '') {
+            return $fallback;
+        }
+
+        if (function_exists('mb_strimwidth')) {
+            $display = mb_strimwidth($display, 0, 72, '…', 'UTF-8');
+        } elseif (strlen($display) > 72) {
+            $display = substr($display, 0, 69) . '...';
+        }
+
+        return $display;
+    }
+}
+
+/**
+ * Retrieve document re-upload request rows for a student or a single application.
+ *
+ * @param PDO $pdo
+ * @param int|null $student_id
+ * @param int|null $application_id
+ * @param array<int, string>|null $statuses Optional status filter list.
+ * @return array<int, array<string, mixed>>
+ */
+if (!function_exists('getDocumentReuploadRequestRows')) {
+    function getDocumentReuploadRequestRows(PDO $pdo, ?int $student_id = null, ?int $application_id = null, ?array $statuses = null): array
+    {
+        if (function_exists('dbEnsureDocumentReviewSchema')) {
+            dbEnsureDocumentReviewSchema($pdo);
+        }
+
+        $where = [];
+        $params = [];
+
+        if ($student_id !== null) {
+            $where[] = 'a.student_id = ?';
+            $params[] = $student_id;
+        }
+
+        if ($application_id !== null) {
+            $where[] = 'a.id = ?';
+            $params[] = $application_id;
+        }
+
+        if ($statuses !== null) {
+            $statuses = array_values(array_filter(array_map(static function ($status) {
+                $status = trim((string) $status);
+                return $status !== '' ? $status : null;
+            }, $statuses)));
+
+            if (empty($statuses)) {
+                return [];
+            }
+
+            $statusPlaceholders = implode(',', array_fill(0, count($statuses), '?'));
+            $where[] = "rr.status IN ({$statusPlaceholders})";
+            foreach ($statuses as $status) {
+                $params[] = $status;
+            }
+        }
+
+        $sql = "
+            SELECT
+                rr.id as request_id,
+                rr.application_id,
+                rr.document_id,
+                rr.note,
+                rr.status as request_status,
+                rr.created_at,
+                rr.resolved_at,
+                a.status as application_status,
+                a.updated_at as application_updated_at,
+                s.name as scholarship_name,
+                d.file_name,
+                d.file_path,
+                d.uploaded_at
+            FROM application_reupload_requests rr
+            JOIN applications a ON rr.application_id = a.id
+            JOIN scholarships s ON a.scholarship_id = s.id
+            JOIN documents d ON rr.document_id = d.id
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY rr.created_at DESC, rr.id DESC
+        ";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+}
+
+/**
  * Retrieves open document re-upload requests for a student or a single application.
  *
  * @param PDO $pdo
@@ -264,48 +426,7 @@ function getStudentApplications($pdo, $user_id) {
  */
 function getOpenDocumentReuploadRequests(PDO $pdo, ?int $student_id = null, ?int $application_id = null): array
 {
-    if (function_exists('dbEnsureDocumentReviewSchema')) {
-        dbEnsureDocumentReviewSchema($pdo);
-    }
-
-    $where = ["rr.status = 'pending'"];
-    $params = [];
-
-    if ($student_id !== null) {
-        $where[] = 'a.student_id = ?';
-        $params[] = $student_id;
-    }
-
-    if ($application_id !== null) {
-        $where[] = 'a.id = ?';
-        $params[] = $application_id;
-    }
-
-    $sql = "
-        SELECT
-            rr.id as request_id,
-            rr.application_id,
-            rr.document_id,
-            rr.note,
-            rr.status as request_status,
-            rr.created_at,
-            rr.resolved_at,
-            a.status as application_status,
-            a.updated_at as application_updated_at,
-            s.name as scholarship_name,
-            d.file_name,
-            d.file_path
-        FROM application_reupload_requests rr
-        JOIN applications a ON rr.application_id = a.id
-        JOIN scholarships s ON a.scholarship_id = s.id
-        JOIN documents d ON rr.document_id = d.id
-        WHERE " . implode(' AND ', $where) . "
-        ORDER BY rr.created_at DESC, rr.id DESC
-    ";
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $rows = getDocumentReuploadRequestRows($pdo, $student_id, $application_id, ['pending']);
 
     if (!$rows) {
         return [];
@@ -340,7 +461,7 @@ function getOpenDocumentReuploadRequests(PDO $pdo, ?int $student_id = null, ?int
         $grouped[$appId]['documents'][] = [
             'request_id' => (int) ($row['request_id'] ?? 0),
             'document_id' => (int) ($row['document_id'] ?? 0),
-            'document_name' => trim((string) ($row['file_name'] ?? '')) !== '' ? (string) $row['file_name'] : 'Document',
+            'document_name' => formatDocumentDisplayName($row['file_name'] ?? ''),
             'document_path' => $row['file_path'] ?? '',
             'note' => $note,
             'created_at' => $row['created_at'] ?? null,
@@ -349,6 +470,53 @@ function getOpenDocumentReuploadRequests(PDO $pdo, ?int $student_id = null, ?int
     }
 
     return array_values($grouped);
+}
+
+if (!function_exists('getStudentReviewAction')) {
+    function getStudentReviewAction(PDO $pdo, int $student_id): ?array
+    {
+        if ($student_id <= 0) {
+            return null;
+        }
+
+        $openRequests = getOpenDocumentReuploadRequests($pdo, $student_id);
+        if (!empty($openRequests)) {
+            $request = $openRequests[0];
+
+            return [
+                'mode' => 'request',
+                'application_id' => (int) ($request['application_id'] ?? 0),
+                'scholarship_name' => $request['scholarship_name'] ?? 'Your application',
+                'application_status' => $request['application_status'] ?? 'Under Review',
+                'count' => (int) ($request['count'] ?? 0),
+                'note' => trim((string) ($request['note'] ?? '')),
+            ];
+        }
+
+        $stmt = $pdo->prepare("
+            SELECT a.id as application_id, a.status as application_status, s.name as scholarship_name
+            FROM applications a
+            JOIN scholarships s ON a.scholarship_id = s.id
+            WHERE a.student_id = ? AND a.status = 'Under Review'
+            ORDER BY COALESCE(a.updated_at, a.submitted_at) DESC, a.id DESC
+            LIMIT 1
+        ");
+        $stmt->execute([$student_id]);
+        $application = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$application) {
+            return null;
+        }
+
+        return [
+            'mode' => 'review',
+            'application_id' => (int) ($application['application_id'] ?? 0),
+            'scholarship_name' => $application['scholarship_name'] ?? 'Your application',
+            'application_status' => $application['application_status'] ?? 'Under Review',
+            'count' => 0,
+            'note' => '',
+        ];
+    }
 }
 
 /**

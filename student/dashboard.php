@@ -23,7 +23,7 @@ $recent_applications = [];
 $active_scholarship = null;
 $drop_request_status = null;
 $pending_exam_application = null;
-$open_reupload_requests = [];
+$review_action = null;
 $student_id = null;
 
 try {
@@ -104,7 +104,7 @@ try {
         $app_stmt->execute([$student_id]);
         $recent_applications = $app_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $open_reupload_requests = getOpenDocumentReuploadRequests($pdo, (int) $student_id);
+        $review_action = getStudentReviewAction($pdo, (int) $student_id);
     }
 } catch (PDOException $e) {
     // In a real app, you would log this error and potentially show a user-friendly error message.
@@ -123,36 +123,29 @@ displayFlashMessages();
     </div>
 </div>
 
-<?php if ($active_scholarship && $active_scholarship['status'] === 'Under Review'): ?>
-    <?php $dashboard_review_request = $open_reupload_requests[0] ?? null; ?>
-    <div class="alert <?php echo !empty($dashboard_review_request) ? 'alert-warning border-warning shadow-sm' : 'alert-info border-info shadow-sm'; ?> d-flex align-items-start gap-3 mb-4" data-aos="fade-up">
+<?php if (!empty($review_action)): ?>
+    <div class="alert <?php echo $review_action['mode'] === 'request' ? 'alert-warning border-warning shadow-sm' : 'alert-info border-info shadow-sm'; ?> d-flex align-items-start gap-3 mb-4" data-aos="fade-up">
         <div class="fs-3 lh-1">
-            <i class="bi <?php echo !empty($dashboard_review_request) ? 'bi-exclamation-triangle-fill' : 'bi-hourglass-split'; ?>"></i>
+            <i class="bi <?php echo $review_action['mode'] === 'request' ? 'bi-exclamation-triangle-fill' : 'bi-hourglass-split'; ?>"></i>
         </div>
         <div class="flex-grow-1">
             <div class="fw-bold mb-1">
-                <?php echo !empty($dashboard_review_request) ? 'Action Required' : 'Under Review'; ?>
+                <?php echo $review_action['mode'] === 'request' ? 'Action Required' : 'Under Review'; ?>
             </div>
             <div class="mb-2">
-                <?php if (!empty($dashboard_review_request)): ?>
-                    <?php echo htmlspecialchars($dashboard_review_request['scholarship_name'] ?? 'Your application'); ?> is under review and <?php echo (int) ($dashboard_review_request['count'] ?? 0); ?> file<?php echo ((int) ($dashboard_review_request['count'] ?? 0) === 1) ? '' : 's'; ?> need to be re-uploaded.
-                    Upload only the requested files. You can also remove a file first if it needs to be cleared, and you do not need to fill out the application form again.
+                <?php if ($review_action['mode'] === 'request'): ?>
+                    <?php echo htmlspecialchars($review_action['scholarship_name'] ?? 'Your application'); ?> needs <?php echo (int) ($review_action['count'] ?? 0); ?> file<?php echo ((int) ($review_action['count'] ?? 0) === 1) ? '' : 's'; ?> updated.
+                    Use the file editor to replace or clear the requested file(s). You do not need to fill out the application form again.
                 <?php else: ?>
-                    <?php echo htmlspecialchars($active_scholarship['name'] ?? 'Your application'); ?> is currently under review. If the admin needs a file fixed, you can re-upload it here without filling out the application form again.
+                    <?php echo htmlspecialchars($review_action['scholarship_name'] ?? 'Your application'); ?> is currently under review. Open the file editor if you need to replace or clear a file without filling out the application form again.
                 <?php endif; ?>
             </div>
-            <?php if (!empty($dashboard_review_request)): ?>
-                <?php if (!empty($dashboard_review_request['note'])): ?>
-                    <div class="small text-dark mb-3"><strong>Note:</strong> <?php echo htmlspecialchars($dashboard_review_request['note']); ?></div>
-                <?php endif; ?>
-                <a href="reupload-document.php?application_id=<?php echo (int) ($dashboard_review_request['application_id'] ?? 0); ?>" class="btn btn-warning btn-sm fw-bold">
-                    <i class="bi bi-upload me-1"></i> Re-upload files
-                </a>
-            <?php elseif (!empty($active_scholarship['application_id'])): ?>
-                <a href="reupload-document.php?application_id=<?php echo (int) $active_scholarship['application_id']; ?>" class="btn btn-info btn-sm fw-bold text-dark">
-                    <i class="bi bi-upload me-1"></i> Re-upload files
-                </a>
+            <?php if ($review_action['mode'] === 'request' && !empty($review_action['note'])): ?>
+                <div class="small text-dark mb-3"><strong>Note:</strong> <?php echo htmlspecialchars($review_action['note']); ?></div>
             <?php endif; ?>
+            <a href="reupload-document.php?application_id=<?php echo (int) ($review_action['application_id'] ?? 0); ?>" class="btn <?php echo $review_action['mode'] === 'request' ? 'btn-warning' : 'btn-info text-dark'; ?> btn-sm fw-bold">
+                <i class="bi bi-folder2-open me-1"></i> Open file editor
+            </a>
         </div>
     </div>
 <?php endif; ?>
@@ -230,32 +223,6 @@ displayFlashMessages();
     <div class="col-lg-4">
         <div class="content-block h-100" data-aos="fade-up" data-aos-delay="300">
             <h3>Quick Actions</h3>
-            <?php if (!empty($open_reupload_requests)): ?>
-                <?php $dashboard_request = $open_reupload_requests[0]; ?>
-                <div class="alert alert-warning border-warning shadow-sm">
-                    <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>Action Required</div>
-                    <div class="small mb-2">
-                        <?php echo htmlspecialchars($dashboard_request['scholarship_name'] ?? 'Your application'); ?> needs <?php echo (int) ($dashboard_request['count'] ?? 0); ?> file<?php echo ((int) ($dashboard_request['count'] ?? 0) === 1) ? '' : 's'; ?> re-uploaded.
-                    </div>
-                    <div class="small text-dark mb-3">Only upload the requested files. You can also remove a file first if it needs to be cleared. Your other application details stay as they are.</div>
-                    <?php if (!empty($dashboard_request['note'])): ?>
-                        <div class="small text-dark mb-3"><strong>Note:</strong> <?php echo htmlspecialchars($dashboard_request['note']); ?></div>
-                    <?php endif; ?>
-                    <a href="reupload-document.php?application_id=<?php echo (int) ($dashboard_request['application_id'] ?? 0); ?>" class="btn btn-warning btn-sm fw-bold">
-                        <i class="bi bi-upload me-1"></i> Re-upload files
-                    </a>
-                </div>
-            <?php elseif ($active_scholarship && $active_scholarship['status'] === 'Under Review'): ?>
-                <div class="alert alert-info border-info shadow-sm">
-                    <div class="fw-bold mb-1"><i class="bi bi-upload me-1"></i>Re-upload Available</div>
-                    <div class="small mb-2">
-                        <?php echo htmlspecialchars($active_scholarship['name'] ?? 'Your application'); ?> is under review. You can replace any file without filling out the full form again.
-                    </div>
-                    <a href="reupload-document.php?application_id=<?php echo (int) ($active_scholarship['application_id'] ?? 0); ?>" class="btn btn-info btn-sm fw-bold text-dark">
-                        <i class="bi bi-upload me-1"></i> Re-upload files
-                    </a>
-                </div>
-            <?php endif; ?>
             <div class="mb-3">
                 <h6 class="text-muted mb-2"><i class="bi bi-play-btn-fill me-2"></i>System Tutorial</h6>
                 <div class="ratio ratio-16x9 rounded overflow-hidden shadow-sm bg-dark">

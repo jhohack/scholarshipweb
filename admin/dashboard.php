@@ -45,6 +45,11 @@ $status_summary = [
     'Approved' => 0,
     'Pending' => 0,
 ];
+$reupload_summary = [
+    'pending' => 0,
+    'completed' => 0,
+    'closed' => 0,
+];
 $recent_applications = [];
 $application_trend_data = [];
 
@@ -94,6 +99,27 @@ try {
     // Fetch last 5 recent applications for the activity feed
     $stmt = $pdo->query("SELECT a.id, a.status, st.student_name, s.name as scholarship_name, a.submitted_at as created_at FROM applications a JOIN students st ON a.student_id = st.id JOIN scholarships s ON a.scholarship_id = s.id ORDER BY a.submitted_at DESC LIMIT 5");
     $recent_applications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Re-upload summary for the admin dashboard
+    $reupload_rows = getDocumentReuploadRequestRows($pdo);
+    $latest_reupload_states = [];
+    foreach ($reupload_rows as $row) {
+        $key = ((int) ($row['application_id'] ?? 0)) . ':' . ((int) ($row['document_id'] ?? 0));
+        if (!isset($latest_reupload_states[$key])) {
+            $latest_reupload_states[$key] = $row;
+        }
+    }
+
+    foreach ($latest_reupload_states as $row) {
+        $status = strtolower(trim((string) ($row['request_status'] ?? '')));
+        if ($status === 'pending') {
+            $reupload_summary['pending']++;
+        } elseif ($status === 'completed') {
+            $reupload_summary['completed']++;
+        } elseif ($status === 'cancelled') {
+            $reupload_summary['closed']++;
+        }
+    }
 
     // Fetch application counts for the last 7 days for the chart
     $trend_stmt = $pdo->query("
@@ -225,14 +251,19 @@ include 'header.php';
         </div>
     </div>
 
-    <!-- Status Summary Card -->
+    <!-- Document Re-upload Card -->
     <div class="col-lg-3 col-md-6" data-aos-delay="400">
-        <div class="stat-card">
-            <div class="stat-icon" style="background-color: #6c757d;"><i class="bi bi-card-checklist"></i></div>
+        <div class="stat-card stat-card-info">
+            <div class="stat-icon bg-info"><i class="bi bi-arrow-repeat"></i></div>
             <div class="stat-card-body">
-                <div class="stat-label">Application Status</div>
-                <div class="small text-muted">Approved</div>
-                <div class="fw-bold fs-4 text-success"><?php echo htmlspecialchars($status_summary['Approved']); ?></div>
+                <div class="stat-label">Document Re-uploads</div>
+                <div class="stat-value"><?php echo htmlspecialchars($reupload_summary['pending']); ?></div>
+                <p class="stat-description mb-0">
+                    <?php echo htmlspecialchars($reupload_summary['completed']); ?> updated | <?php echo htmlspecialchars($reupload_summary['closed']); ?> closed
+                </p>
+                <?php if (canAccess('applications.php')): ?>
+                <a href="applications.php?status_filter=Under%20Review" class="stat-link mt-1">Review Requests <i class="bi bi-arrow-right"></i></a>
+                <?php endif; ?>
             </div>
         </div>
     </div>
