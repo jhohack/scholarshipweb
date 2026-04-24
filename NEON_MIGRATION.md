@@ -92,6 +92,58 @@ Important:
 
 Redeploy on Vercel after the Neon env vars are saved.
 
+## 7. Restore the Old Snapshot
+
+If the old Neon project is paused or you cannot reach it because of the transfer limit, you can restore the saved snapshot in this repo into a PostgreSQL database.
+
+The backup lives at:
+
+- `backups/neon-before-replace-20260411-003956.json`
+
+Run the restore tool against an empty PostgreSQL database:
+
+```powershell
+C:\xampp\php\php.exe tools\restore_neon_backup_json.php --database-url "postgresql://..."
+```
+
+If you want to replace the data already in the target database, add `--truncate`:
+
+```powershell
+C:\xampp\php\php.exe tools\restore_neon_backup_json.php --database-url "postgresql://..." --truncate
+```
+
+Important:
+
+- `--truncate` removes the existing rows in the target database before restoring the backup.
+- The script recreates the current PostgreSQL schema first, then loads the saved snapshot.
+- It also restores `uploaded_files.content_blob`, so database-stored uploads come back with the rest of the data.
+
+## 8. Local MySQL Recovery
+
+If Neon is still blocked, you can restore the same snapshot into the local XAMPP MariaDB server and run the app from that copy.
+
+The local restore script is:
+
+- `tools/restore_neon_backup_json_mysql.php`
+
+By default it creates a fresh `scholarship_old_data` database on `127.0.0.1:3306`:
+
+```powershell
+C:\xampp\php\php.exe tools\restore_neon_backup_json_mysql.php --fresh
+```
+
+Then point the app at that local database with:
+
+```env
+DB_DRIVER=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_NAME=scholarship_old_data
+DB_USER=root
+DB_PASS=
+UPLOAD_DRIVER=database
+```
+
 ## Notes
 
 - The generated PostgreSQL import already backfills:
