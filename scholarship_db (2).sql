@@ -598,7 +598,7 @@ INSERT INTO `students` (`id`, `user_id`, `student_name`, `school_id_number`, `em
 (3, 4, 'Peter Jones', '2023-003-C', 'peter.jones@example.com', '555-555-6666', '2005-01-30', '789 Pine Ln, Yourtown, USA', 'new', '2025-12-12 11:01:00', '2026-01-02 08:30:31'),
 (4, 5, 'Emily Rose White', '2022-004-D', 'emily.white@example.com', '555-777-8888', '2004-11-12', '101 Maple Dr, Newtown, USA', 'new', '2025-12-13 12:01:00', '2025-12-31 16:07:13'),
 (6, 1, 'Admin User', 'ADMIN001', 'jhorose@dvci-edu.com', '123-456-7890', '1990-01-01', NULL, 'new', '2025-12-17 14:50:16', '2025-12-17 16:47:34'),
-(8, 8, 'awl dawd lkesmnfolsa', '20240596054', 'jhorosef@gmail.com', '09937414256', '1999-06-27', NULL, 'new', '2025-12-27 05:54:32', '2026-01-02 19:09:25'),
+(8, 8, 'awl dawd lkesmnfolsa', '20240596054', 'dvcscholarship@dvci-edu.com', '09937414256', '1999-06-27', NULL, 'new', '2025-12-27 05:54:32', '2026-01-02 19:09:25'),
 (9, 10, 'sdf d dsfs', '20240596056', 'firmezajhorose04@gmail.com', '09937414256', '2026-01-15', NULL, 'new', '2026-01-02 20:16:13', '2026-01-02 21:18:08');
 
 -- --------------------------------------------------------
@@ -637,7 +637,7 @@ INSERT INTO `users` (`id`, `first_name`, `middle_name`, `last_name`, `email`, `p
 (3, 'Jane', 'Anne', 'Smith', 'jane.smith@example.com', 'password123', '555-333-4444', '2003-08-22', '2021-002-B', 'student', 'active', 1, '2025-12-11 10:00:00', '2025-12-11 10:00:00', '2025-12-11 10:00:00', 'New Applicant', NULL),
 (4, 'Peter', NULL, 'Jones', 'peter.jones@example.com', 'password123', '555-555-6666', '2005-01-30', '2023-003-C', 'student', 'active', 1, '2025-12-12 11:00:00', '2025-12-12 11:00:00', '2025-12-12 11:00:00', 'New Applicant', NULL),
 (5, 'Emily', 'Rose', 'White', 'emily.white@example.com', 'password123', '555-777-8888', '2004-11-12', '2022-004-D', 'student', 'active', 1, '2025-12-13 12:00:00', '2025-12-13 12:00:00', '2025-12-13 12:00:00', 'New Applicant', NULL),
-(8, 'awl', 'dawd', 'lkesmnfolsa', 'jhorosef@gmail.com', '12345678', '09937414256', '1999-06-27', '20240596054', 'student', 'active', 1, NULL, '2025-12-27 05:54:32', '2026-01-02 19:50:15', 'New Applicant', 'uploads/avatars/user_8_1767383415_0aa7131d-c7ca-43cc-afd9-269eed0b385e.jfif'),
+(8, 'awl', 'dawd', 'lkesmnfolsa', 'dvcscholarship@dvci-edu.com', '12345678', '09937414256', '1999-06-27', '20240596054', 'student', 'active', 1, NULL, '2025-12-27 05:54:32', '2026-01-02 19:50:15', 'New Applicant', 'uploads/avatars/user_8_1767383415_0aa7131d-c7ca-43cc-afd9-269eed0b385e.jfif'),
 (9, 'System', NULL, 'Admin', 'admin@dvc.edu.ph', 'admin123', NULL, NULL, NULL, 'admin', 'archived', 1, NULL, '2025-12-28 08:03:56', '2026-01-02 13:57:33', 'New Applicant', NULL),
 (10, 'sdf', 'd', 'dsfs', 'firmezajhorose04@gmail.com', '12345678', '09937414256', '2026-01-15', '20240596056', 'student', 'active', 1, NULL, '2026-01-02 20:16:13', '2026-01-02 20:43:13', 'New Applicant', 'uploads/avatars/new_user_6958278d50c25_0be13ddc-9e76-4756-ba97-29cc6fcf37f5.jfif');
 
