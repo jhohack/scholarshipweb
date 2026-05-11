@@ -74,20 +74,20 @@ try {
         }
 
 
-        // Count active applications
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM applications WHERE student_id = ? AND status IN ('Pending', 'Under Review', 'Pending Exam', 'Renewal Request')"); // Corrected to use student_id
-        $stmt->execute([$student_id]);
-        $active_applications_count = $stmt->fetchColumn();
-
-        // Count approved applications
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM applications WHERE student_id = ? AND status IN ('Approved', 'Active', 'For Renewal', 'Drop Requested')");
-        $stmt->execute([$student_id]);
-        $approved_applications_count = $stmt->fetchColumn();
-
-        // Count rejected applications
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM applications WHERE student_id = ? AND status = 'Rejected'");
-        $stmt->execute([$student_id]);
-        $rejected_applications_count = $stmt->fetchColumn();
+        // Fetch all status counts in one pass so the dashboard avoids three extra round-trips.
+        $counts_stmt = $pdo->prepare("
+            SELECT
+                SUM(CASE WHEN status IN ('Pending', 'Under Review', 'Pending Exam', 'Renewal Request') THEN 1 ELSE 0 END) AS active_applications_count,
+                SUM(CASE WHEN status IN ('Approved', 'Active', 'For Renewal', 'Drop Requested') THEN 1 ELSE 0 END) AS approved_applications_count,
+                SUM(CASE WHEN status = 'Rejected' THEN 1 ELSE 0 END) AS rejected_applications_count
+            FROM applications
+            WHERE student_id = ?
+        ");
+        $counts_stmt->execute([$student_id]);
+        $counts_row = $counts_stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $active_applications_count = (int) ($counts_row['active_applications_count'] ?? 0);
+        $approved_applications_count = (int) ($counts_row['approved_applications_count'] ?? 0);
+        $rejected_applications_count = (int) ($counts_row['rejected_applications_count'] ?? 0);
 
         // Fetch 5 most recent applications
         $app_stmt = $pdo->prepare("

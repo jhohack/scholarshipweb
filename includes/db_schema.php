@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/cache.php';
 
 if (!function_exists('dbDriverName')) {
     function dbDriverName(?PDO $pdo = null): string
@@ -25,6 +26,13 @@ if (!function_exists('dbIsMysql')) {
     }
 }
 
+if (!function_exists('dbSchemaCacheKey')) {
+    function dbSchemaCacheKey(PDO $pdo): string
+    {
+        return spl_object_id($pdo) . ':' . dbDriverName($pdo);
+    }
+}
+
 if (!function_exists('dbQuoteIdentifier')) {
     function dbQuoteIdentifier(string $identifier): string
     {
@@ -39,6 +47,12 @@ if (!function_exists('dbQuoteIdentifier')) {
 if (!function_exists('dbTableExists')) {
     function dbTableExists(PDO $pdo, string $tableName): bool
     {
+        static $cache = [];
+        $cacheKey = dbSchemaCacheKey($pdo) . ':table:' . $tableName;
+        if (array_key_exists($cacheKey, $cache)) {
+            return $cache[$cacheKey];
+        }
+
         if (dbIsPgsql($pdo)) {
             $stmt = $pdo->prepare("
                 SELECT COUNT(*)
@@ -56,39 +70,26 @@ if (!function_exists('dbTableExists')) {
         }
 
         $stmt->execute([$tableName]);
-        return (int) $stmt->fetchColumn() > 0;
+        return $cache[$cacheKey] = ((int) $stmt->fetchColumn() > 0);
     }
 }
 
 if (!function_exists('dbColumnExists')) {
     function dbColumnExists(PDO $pdo, string $tableName, string $columnName): bool
     {
-        if (dbIsPgsql($pdo)) {
-            $stmt = $pdo->prepare("
-                SELECT COUNT(*)
-                FROM information_schema.columns
-                WHERE table_schema = current_schema()
-                AND table_name = ?
-                AND column_name = ?
-            ");
-        } else {
-            $stmt = $pdo->prepare("
-                SELECT COUNT(*)
-                FROM information_schema.columns
-                WHERE table_schema = DATABASE()
-                AND table_name = ?
-                AND column_name = ?
-            ");
-        }
-
-        $stmt->execute([$tableName, $columnName]);
-        return (int) $stmt->fetchColumn() > 0;
+        return in_array($columnName, dbListColumns($pdo, $tableName), true);
     }
 }
 
 if (!function_exists('dbListColumns')) {
     function dbListColumns(PDO $pdo, string $tableName): array
     {
+        static $cache = [];
+        $cacheKey = dbSchemaCacheKey($pdo) . ':columns:' . $tableName;
+        if (array_key_exists($cacheKey, $cache)) {
+            return $cache[$cacheKey];
+        }
+
         if (dbIsPgsql($pdo)) {
             $stmt = $pdo->prepare("
                 SELECT column_name
@@ -108,7 +109,153 @@ if (!function_exists('dbListColumns')) {
         }
 
         $stmt->execute([$tableName]);
-        return $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+        return $cache[$cacheKey] = ($stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+    }
+}
+
+if (!function_exists('dbIndexExists')) {
+    function dbIndexExists(PDO $pdo, string $indexName): bool
+    {
+        static $cache = [];
+        $cacheKey = dbSchemaCacheKey($pdo) . ':index:' . $indexName;
+        if (array_key_exists($cacheKey, $cache)) {
+            return $cache[$cacheKey];
+        }
+
+        if (dbIsPgsql($pdo)) {
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*)
+                FROM pg_indexes
+                WHERE schemaname = current_schema()
+                AND indexname = ?
+            ");
+        } else {
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*)
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE()
+                AND index_name = ?
+            ");
+        }
+
+        $stmt->execute([$indexName]);
+        return $cache[$cacheKey] = ((int) $stmt->fetchColumn() > 0);
+    }
+}
+
+if (!function_exists('dbFormatIndexExpression')) {
+    function dbFormatIndexExpression(string $expression): string
+    {
+        $expression = trim($expression);
+        if (preg_match('/^([A-Za-z_][A-Za-z0-9_]*)(?:\s+(ASC|DESC))?$/i', $expression, $matches)) {
+            $column = dbQuoteIdentifier($matches[1]);
+            $direction = isset($matches[2]) ? ' ' . strtoupper($matches[2]) : '';
+            return $column . $direction;
+        }
+
+        return $expression;
+    }
+}
+
+if (!function_exists('dbEnsureIndex')) {
+    function dbEnsureIndex(PDO $pdo, string $indexName, string $tableName, array $columns): void
+    {
+        if (dbIndexExists($pdo, $indexName)) {
+            return;
+        }
+
+        $indexSql = dbQuoteIdentifier($indexName);
+        $tableSql = dbQuoteIdentifier($tableName);
+        $columnSql = implode(', ', array_map('dbFormatIndexExpression', $columns));
+
+        $pdo->exec("CREATE INDEX {$indexSql} ON {$tableSql} ({$columnSql})");
+    }
+}
+
+if (!function_exists('dbEnsureIndexBatchOnce')) {
+    function dbEnsureIndexBatchOnce(PDO $pdo, string $cacheKey, callable $callback): void
+    {
+        if (function_exists('portalCacheGet') && function_exists('portalCacheSet') && function_exists('portalCacheMissMarker')) {
+            $cached = portalCacheGet($cacheKey, 86400);
+            if ($cached !== portalCacheMissMarker()) {
+                return;
+            }
+        }
+
+        $callback();
+
+        if (function_exists('portalCacheSet')) {
+            portalCacheSet($cacheKey, true, 86400);
+        }
+    }
+}
+
+if (!function_exists('dbEnsureStudentIndexes')) {
+    function dbEnsureStudentIndexes(PDO $pdo): void
+    {
+        dbEnsureIndexBatchOnce($pdo, 'schema.indexes.students.v1', function () use ($pdo) {
+            dbEnsureIndex($pdo, 'idx_students_user_id', 'students', ['user_id']);
+            dbEnsureIndex($pdo, 'idx_students_school_id_number', 'students', ['school_id_number']);
+        });
+    }
+}
+
+if (!function_exists('dbEnsureApplicationsIndexes')) {
+    function dbEnsureApplicationsIndexes(PDO $pdo): void
+    {
+        dbEnsureIndexBatchOnce($pdo, 'schema.indexes.applications.v1', function () use ($pdo) {
+            dbEnsureIndex($pdo, 'idx_applications_student_scholarship_id_desc', 'applications', ['student_id', 'scholarship_id', 'id DESC']);
+            dbEnsureIndex($pdo, 'idx_applications_scholarship_student_id_desc', 'applications', ['scholarship_id', 'student_id', 'id DESC']);
+            dbEnsureIndex($pdo, 'idx_applications_student_status_id_desc', 'applications', ['student_id', 'status', 'id DESC']);
+            dbEnsureIndex($pdo, 'idx_applications_scholarship_status_id_desc', 'applications', ['scholarship_id', 'status', 'id DESC']);
+        });
+    }
+}
+
+if (!function_exists('dbEnsureDocumentReviewIndexes')) {
+    function dbEnsureDocumentReviewIndexes(PDO $pdo): void
+    {
+        dbEnsureIndexBatchOnce($pdo, 'schema.indexes.application_reupload_requests.v1', function () use ($pdo) {
+            dbEnsureIndex($pdo, 'idx_application_reupload_requests_application_status_created_at', 'application_reupload_requests', ['application_id', 'status', 'created_at DESC', 'id DESC']);
+            dbEnsureIndex($pdo, 'idx_application_reupload_requests_document_id', 'application_reupload_requests', ['document_id']);
+            dbEnsureIndex($pdo, 'idx_documents_application_id', 'documents', ['application_id']);
+            dbEnsureIndex($pdo, 'idx_documents_user_id', 'documents', ['user_id']);
+        });
+    }
+}
+
+if (!function_exists('dbEnsureMessagingIndexes')) {
+    function dbEnsureMessagingIndexes(PDO $pdo): void
+    {
+        dbEnsureIndexBatchOnce($pdo, 'schema.indexes.messaging.v1', function () use ($pdo) {
+            dbEnsureIndex($pdo, 'idx_conversations_student_updated_at', 'conversations', ['student_user_id', 'updated_at DESC', 'id DESC']);
+            dbEnsureIndex($pdo, 'idx_messages_conversation_created_at', 'messages', ['conversation_id', 'created_at DESC', 'id DESC']);
+            dbEnsureIndex($pdo, 'idx_messages_conversation_read_sender', 'messages', ['conversation_id', 'is_read', 'sender_id', 'id DESC']);
+        });
+    }
+}
+
+if (!function_exists('dbEnsureFormsIndexes')) {
+    function dbEnsureFormsIndexes(PDO $pdo): void
+    {
+        dbEnsureIndexBatchOnce($pdo, 'schema.indexes.forms.v1', function () use ($pdo) {
+            dbEnsureIndex($pdo, 'idx_forms_scholarship_id', 'forms', ['scholarship_id']);
+            dbEnsureIndex($pdo, 'idx_form_fields_scholarship_id', 'form_fields', ['scholarship_id']);
+            dbEnsureIndex($pdo, 'idx_form_fields_form_id', 'form_fields', ['form_id']);
+            dbEnsureIndex($pdo, 'idx_application_responses_application_id', 'application_responses', ['application_id']);
+        });
+    }
+}
+
+if (!function_exists('dbEnsureExamIndexes')) {
+    function dbEnsureExamIndexes(PDO $pdo): void
+    {
+        dbEnsureIndexBatchOnce($pdo, 'schema.indexes.exam.v1', function () use ($pdo) {
+            dbEnsureIndex($pdo, 'idx_exam_questions_scholarship_id', 'exam_questions', ['scholarship_id']);
+            dbEnsureIndex($pdo, 'idx_exam_submissions_student_id', 'exam_submissions', ['student_id']);
+            dbEnsureIndex($pdo, 'idx_exam_submissions_scholarship_id', 'exam_submissions', ['scholarship_id']);
+            dbEnsureIndex($pdo, 'idx_exam_answers_submission_id', 'exam_answers', ['submission_id']);
+        });
     }
 }
 
@@ -183,6 +330,7 @@ if (!function_exists('dbEnsureApplicationsSchema')) {
         dbAddColumnIfMissing($pdo, 'applications', 'student_status', 'VARCHAR(50) NULL DEFAULT NULL');
         dbAddColumnIfMissing($pdo, 'applications', 'scholarship_percentage', 'DECIMAL(5,2) NULL DEFAULT NULL', 'NUMERIC(5,2) NULL DEFAULT NULL');
         dbAddColumnIfMissing($pdo, 'applications', 'scholarship_amount', 'DECIMAL(10,2) NULL DEFAULT NULL', 'NUMERIC(10,2) NULL DEFAULT NULL');
+        dbEnsureApplicationsIndexes($pdo);
     }
 }
 
@@ -230,6 +378,7 @@ if (!function_exists('dbEnsureDocumentReviewSchema')) {
         dbAddColumnIfMissing($pdo, 'application_reupload_requests', 'created_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
         dbAddColumnIfMissing($pdo, 'application_reupload_requests', 'resolved_at', 'TIMESTAMP NULL DEFAULT NULL');
         dbAddColumnIfMissing($pdo, 'application_reupload_requests', 'admin_id', 'INT NULL', 'INTEGER NULL');
+        dbEnsureDocumentReviewIndexes($pdo);
     }
 }
 
@@ -335,6 +484,7 @@ if (!function_exists('dbEnsureFormsSchema')) {
         dbAddColumnIfMissing($pdo, 'form_fields', 'field_options', 'TEXT DEFAULT NULL');
         dbAddColumnIfMissing($pdo, 'form_fields', 'options', 'TEXT DEFAULT NULL');
         dbAddColumnIfMissing($pdo, 'form_fields', 'is_required', 'TINYINT(1) NOT NULL DEFAULT 0', 'SMALLINT NOT NULL DEFAULT 0');
+        dbEnsureFormsIndexes($pdo);
     }
 }
 
@@ -430,6 +580,7 @@ if (!function_exists('dbEnsureExamSchema')) {
         dbAddColumnIfMissing($pdo, 'scholarships', 'requires_exam', 'TINYINT(1) NOT NULL DEFAULT 0', 'SMALLINT NOT NULL DEFAULT 0');
         dbAddColumnIfMissing($pdo, 'scholarships', 'passing_score', 'INT DEFAULT 75');
         dbAddColumnIfMissing($pdo, 'scholarships', 'exam_duration', 'INT DEFAULT 60');
+        dbEnsureExamIndexes($pdo);
     }
 }
 
@@ -456,6 +607,7 @@ if (!function_exists('dbEnsureUserStudentSyncSchema')) {
         dbAddColumnIfMissing($pdo, 'students', 'phone', 'VARCHAR(50) NULL DEFAULT NULL');
         dbAddColumnIfMissing($pdo, 'students', 'date_of_birth', 'DATE NULL DEFAULT NULL');
         dbAddColumnIfMissing($pdo, 'students', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
+        dbEnsureStudentIndexes($pdo);
     }
 }
 
@@ -645,6 +797,7 @@ if (!function_exists('dbEnsureMessagingSchema')) {
         dbAddColumnIfMissing($pdo, 'conversations', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
         dbAddColumnIfMissing($pdo, 'messages', 'attachment_path', 'VARCHAR(255) DEFAULT NULL');
         dbAddColumnIfMissing($pdo, 'messages', 'is_read', 'TINYINT(1) NOT NULL DEFAULT 0', 'SMALLINT NOT NULL DEFAULT 0');
+        dbEnsureMessagingIndexes($pdo);
     }
 }
 

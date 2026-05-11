@@ -96,9 +96,6 @@ $page_title = 'All Scholarships';
     <?php include dirname(__DIR__) . '/includes/favicon.php'; ?>
     <!-- Custom CSS -->
     <link rel="stylesheet" href="assets/css/style.css">
-    <?php foreach (array_slice($scholarships, 0, 6) as $prefetchScholarship): ?>
-        <link rel="prefetch" href="scholarship-details.php?id=<?php echo (int) $prefetchScholarship['id']; ?>" as="document">
-    <?php endforeach; ?>
 </head>
 <body>
     <?php include $base_path . '/public/header.php'; ?>

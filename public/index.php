@@ -143,11 +143,6 @@ $page_title = 'DVC Scholarship Hub';
     <?php include dirname(__DIR__) . '/includes/favicon.php'; ?>
     <!-- Custom CSS -->
     <link rel="stylesheet" href="assets/css/style.css">
-    <link rel="prefetch" href="scholarships.php" as="document">
-    <link rel="prefetch" href="announcements.php" as="document">
-    <?php foreach (array_slice($scholarships, 0, 3) as $prefetchScholarship): ?>
-        <link rel="prefetch" href="scholarship-details.php?id=<?php echo (int) $prefetchScholarship['id']; ?>" as="document">
-    <?php endforeach; ?>
     <style>
     /* New Announcement Section Styles */
     .announcement-section-v2 {

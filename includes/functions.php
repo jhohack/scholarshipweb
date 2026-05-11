@@ -523,43 +523,45 @@ if (!function_exists('getStudentReviewAction')) {
             return null;
         }
 
-        $openRequests = getOpenDocumentReuploadRequests($pdo, $student_id);
-        if (!empty($openRequests)) {
-            $request = $openRequests[0];
+        return portalCacheRemember('student.review_action:' . $student_id, 30, function () use ($pdo, $student_id) {
+            $openRequests = getOpenDocumentReuploadRequests($pdo, $student_id);
+            if (!empty($openRequests)) {
+                $request = $openRequests[0];
+
+                return [
+                    'mode' => 'request',
+                    'application_id' => (int) ($request['application_id'] ?? 0),
+                    'scholarship_name' => $request['scholarship_name'] ?? 'Your application',
+                    'application_status' => $request['application_status'] ?? 'Under Review',
+                    'count' => (int) ($request['count'] ?? 0),
+                    'note' => trim((string) ($request['note'] ?? '')),
+                ];
+            }
+
+            $stmt = $pdo->prepare("
+                SELECT a.id as application_id, a.status as application_status, s.name as scholarship_name
+                FROM applications a
+                JOIN scholarships s ON a.scholarship_id = s.id
+                WHERE a.student_id = ? AND a.status = 'Under Review'
+                ORDER BY COALESCE(a.updated_at, a.submitted_at) DESC, a.id DESC
+                LIMIT 1
+            ");
+            $stmt->execute([$student_id]);
+            $application = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$application) {
+                return null;
+            }
 
             return [
-                'mode' => 'request',
-                'application_id' => (int) ($request['application_id'] ?? 0),
-                'scholarship_name' => $request['scholarship_name'] ?? 'Your application',
-                'application_status' => $request['application_status'] ?? 'Under Review',
-                'count' => (int) ($request['count'] ?? 0),
-                'note' => trim((string) ($request['note'] ?? '')),
+                'mode' => 'review',
+                'application_id' => (int) ($application['application_id'] ?? 0),
+                'scholarship_name' => $application['scholarship_name'] ?? 'Your application',
+                'application_status' => $application['application_status'] ?? 'Under Review',
+                'count' => 0,
+                'note' => '',
             ];
-        }
-
-        $stmt = $pdo->prepare("
-            SELECT a.id as application_id, a.status as application_status, s.name as scholarship_name
-            FROM applications a
-            JOIN scholarships s ON a.scholarship_id = s.id
-            WHERE a.student_id = ? AND a.status = 'Under Review'
-            ORDER BY COALESCE(a.updated_at, a.submitted_at) DESC, a.id DESC
-            LIMIT 1
-        ");
-        $stmt->execute([$student_id]);
-        $application = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$application) {
-            return null;
-        }
-
-        return [
-            'mode' => 'review',
-            'application_id' => (int) ($application['application_id'] ?? 0),
-            'scholarship_name' => $application['scholarship_name'] ?? 'Your application',
-            'application_status' => $application['application_status'] ?? 'Under Review',
-            'count' => 0,
-            'note' => '',
-        ];
+        });
     }
 }
 

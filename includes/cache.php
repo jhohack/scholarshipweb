@@ -1,5 +1,18 @@
 <?php
 
+if (!function_exists('portalCacheMissMarker')) {
+    function portalCacheMissMarker()
+    {
+        static $marker = null;
+
+        if ($marker === null) {
+            $marker = new stdClass();
+        }
+
+        return $marker;
+    }
+}
+
 if (!function_exists('portalCacheDir')) {
     function portalCacheDir(): string
     {
@@ -39,25 +52,25 @@ if (!function_exists('portalCacheGet')) {
         $path = portalCachePath($key);
 
         if (!is_file($path)) {
-            return null;
+            return portalCacheMissMarker();
         }
 
         $payload = @file_get_contents($path);
         if ($payload === false || $payload === '') {
-            return null;
+            return portalCacheMissMarker();
         }
 
         $data = @unserialize($payload, ['allowed_classes' => false]);
-        if (!is_array($data) || !array_key_exists('expires_at', $data)) {
-            return null;
+        if (!is_array($data) || !array_key_exists('expires_at', $data) || !array_key_exists('value', $data)) {
+            return portalCacheMissMarker();
         }
 
         if ((int) $data['expires_at'] < time()) {
             @unlink($path);
-            return null;
+            return portalCacheMissMarker();
         }
 
-        return $data['value'] ?? null;
+        return $data['value'];
     }
 }
 
@@ -88,7 +101,7 @@ if (!function_exists('portalCacheRemember')) {
     function portalCacheRemember(string $key, int $ttlSeconds, callable $callback)
     {
         $cached = portalCacheGet($key, $ttlSeconds);
-        if ($cached !== null) {
+        if ($cached !== portalCacheMissMarker()) {
             return $cached;
         }
 

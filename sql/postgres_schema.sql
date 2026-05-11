@@ -267,3 +267,12 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation
 CREATE INDEX IF NOT EXISTS idx_support_tickets_student_id ON support_tickets(student_id);
 CREATE INDEX IF NOT EXISTS idx_support_tickets_application_id ON support_tickets(application_id);
 CREATE INDEX IF NOT EXISTS idx_support_messages_ticket_id ON support_messages(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_applications_student_scholarship_id_desc ON applications(student_id, scholarship_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_applications_scholarship_student_id_desc ON applications(scholarship_id, student_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_applications_student_status_id_desc ON applications(student_id, status, id DESC);
+CREATE INDEX IF NOT EXISTS idx_applications_scholarship_status_id_desc ON applications(scholarship_id, status, id DESC);
+CREATE INDEX IF NOT EXISTS idx_application_reupload_requests_application_status_created_at ON application_reupload_requests(application_id, status, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_application_reupload_requests_document_id ON application_reupload_requests(document_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_student_updated_at ON conversations(student_user_id, updated_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_created_at ON messages(conversation_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_read_sender ON messages(conversation_id, is_read, sender_id, id DESC);

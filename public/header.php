@@ -50,12 +50,12 @@ $disable_unread_polling = in_array($current_page, ['apply.php', 'entrance-exam.p
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link main-nav-link <?php echo ($current_page === 'announcements.php') ? 'active fw-bold' : ''; ?>" href="announcements.php" data-prefetch="warm" <?php if ($current_page === 'announcements.php') echo 'aria-current="page"'; ?>>
+                            <a class="nav-link main-nav-link <?php echo ($current_page === 'announcements.php') ? 'active fw-bold' : ''; ?>" href="announcements.php" <?php if ($current_page === 'announcements.php') echo 'aria-current="page"'; ?>>
                                 <i class="bi bi-megaphone" aria-hidden="true"></i><span>Announcements</span>
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link main-nav-link <?php echo ($current_page === 'scholarships.php') ? 'active fw-bold' : ''; ?>" href="scholarships.php" data-prefetch="warm" <?php if ($current_page === 'scholarships.php') echo 'aria-current="page"'; ?>>
+                            <a class="nav-link main-nav-link <?php echo ($current_page === 'scholarships.php') ? 'active fw-bold' : ''; ?>" href="scholarships.php" <?php if ($current_page === 'scholarships.php') echo 'aria-current="page"'; ?>>
                                 <i class="bi bi-journal-check" aria-hidden="true"></i><span>Scholarships</span>
                             </a>
                         </li>
@@ -101,8 +101,8 @@ $disable_unread_polling = in_array($current_page, ['apply.php', 'entrance-exam.p
                         <?php else: ?>
                             <?php // This block is for logged-out users OR an admin viewing the site. ?>
                             <div class="d-flex gap-2 w-100 w-lg-auto">
-                                <a class="btn btn-outline-primary px-4 fw-semibold rounded-pill w-50 w-lg-auto" href="login.php" data-prefetch="warm">Login</a>
-                                <a class="btn btn-primary px-4 fw-semibold rounded-pill w-50 w-lg-auto shadow-sm" href="register.php" data-prefetch="warm">Register</a>
+                                <a class="btn btn-outline-primary px-4 fw-semibold rounded-pill w-50 w-lg-auto" href="login.php">Login</a>
+                                <a class="btn btn-primary px-4 fw-semibold rounded-pill w-50 w-lg-auto shadow-sm" href="register.php">Register</a>
                             </div>
                         <?php endif; ?>
                     </div>
@@ -169,7 +169,7 @@ $disable_unread_polling = in_array($current_page, ['apply.php', 'entrance-exam.p
                     if (!document.hidden) {
                         updateUnreadCount();
                     }
-                }, 15000);
+                }, 30000);
             }
 
             document.addEventListener('visibilitychange', startUnreadPolling);
@@ -199,35 +199,22 @@ $disable_unread_polling = in_array($current_page, ['apply.php', 'entrance-exam.p
                 fetch(resolvedUrl.href, { credentials: 'same-origin', cache: 'force-cache' }).catch(() => {});
             }
 
-            function warmPrefetchTargets() {
-                document.querySelectorAll('a[data-prefetch="warm"]').forEach((link) => {
-                    prefetchDocument(link.href);
-                });
-            }
-
-            const warmRunner = () => warmPrefetchTargets();
-            if ('requestIdleCallback' in window) {
-                requestIdleCallback(warmRunner, { timeout: 1500 });
-            } else {
-                setTimeout(warmRunner, 1200);
-            }
-
             document.addEventListener('mouseover', function(event) {
-                const link = event.target.closest('a[data-prefetch="hover"], a[data-prefetch="warm"]');
+                const link = event.target.closest('a[data-prefetch="hover"]');
                 if (link) {
                     prefetchDocument(link.href);
                 }
             });
 
             document.addEventListener('focusin', function(event) {
-                const link = event.target.closest('a[data-prefetch="hover"], a[data-prefetch="warm"]');
+                const link = event.target.closest('a[data-prefetch="hover"]');
                 if (link) {
                     prefetchDocument(link.href);
                 }
             });
 
             document.addEventListener('touchstart', function(event) {
-                const link = event.target.closest('a[data-prefetch="hover"], a[data-prefetch="warm"]');
+                const link = event.target.closest('a[data-prefetch="hover"]');
                 if (link) {
                     prefetchDocument(link.href);
                 }
