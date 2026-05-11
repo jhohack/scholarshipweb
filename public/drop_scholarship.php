@@ -24,9 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($application_id) {
         try {
             // 1. Get Student ID
-            $stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
-            $stmt->execute([$user_id]);
-            $student_id = $stmt->fetchColumn();
+            $student_id = getCurrentStudentId($pdo, (int) $user_id);
 
             if ($student_id) {
                 // 2. Verify the application belongs to the student

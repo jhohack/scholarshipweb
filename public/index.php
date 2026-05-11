@@ -7,13 +7,14 @@ require_once __DIR__ . '/../includes/db.php'; // This file should create the $pd
 require_once __DIR__ . '/../includes/functions.php';
 
 checkSessionTimeout();
+portalSendPageCacheHeaders(300, isLoggedIn());
 
 $current_page = basename($_SERVER['PHP_SELF']);
 
 // Check if a user is logged in. If so, hide the CTA.
 $is_user_logged_in = isset($_SESSION['user_id']);
 
-$indexPayload = portalCacheRemember('public.index.payload', 60, function () use ($pdo) {
+$indexPayload = portalCacheRemember('public.index.payload', 300, function () use ($pdo) {
     $scholarships = [];
     $announcements = [];
     $trust_stats = [
@@ -142,6 +143,11 @@ $page_title = 'DVC Scholarship Hub';
     <?php include dirname(__DIR__) . '/includes/favicon.php'; ?>
     <!-- Custom CSS -->
     <link rel="stylesheet" href="assets/css/style.css">
+    <link rel="prefetch" href="scholarships.php" as="document">
+    <link rel="prefetch" href="announcements.php" as="document">
+    <?php foreach (array_slice($scholarships, 0, 3) as $prefetchScholarship): ?>
+        <link rel="prefetch" href="scholarship-details.php?id=<?php echo (int) $prefetchScholarship['id']; ?>" as="document">
+    <?php endforeach; ?>
     <style>
     /* New Announcement Section Styles */
     .announcement-section-v2 {

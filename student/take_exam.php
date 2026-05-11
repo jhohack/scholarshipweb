@@ -41,9 +41,7 @@ if (!$scholarship_id) {
 
 // Legacy compatibility route: move students into the application-based exam flow.
 try {
-    $student_stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
-    $student_stmt->execute([$_SESSION['user_id']]);
-    $student_id = $student_stmt->fetchColumn();
+    $student_id = getCurrentStudentId($pdo, (int) $_SESSION['user_id']);
 
     if (!$student_id) {
         flashMessage("Student profile not found.");

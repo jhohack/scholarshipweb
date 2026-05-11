@@ -44,10 +44,8 @@ try {
         exit();
     }
 
-    // Get student ID
-    $student_stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
-    $student_stmt->execute([$user_id]);
-    $student_id = $student_stmt->fetchColumn();
+    // Reuse the student ID cached in the session when available.
+    $student_id = getCurrentStudentId($pdo, (int) $user_id);
 
 } catch (PDOException $e) {
     $errors[] = "A database error occurred. Please try again later.";

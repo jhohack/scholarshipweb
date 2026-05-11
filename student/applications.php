@@ -21,13 +21,10 @@ $student_id = null;
 
 // Fetch applications for the logged-in student
 try {
-    // First, get the student_id from the user_id
-    $student_stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
-    $student_stmt->execute([$user_id]);
-    $student = $student_stmt->fetch();
+    // Reuse the student ID cached in the session when available.
+    $student_id = getCurrentStudentId($pdo, (int) $user_id);
 
-    if ($student) {
-        $student_id = $student['id'];
+    if ($student_id) {
         $stmt = $pdo->prepare("
             SELECT a.id, s.name AS scholarship_name, a.status, a.submitted_at, a.updated_at
             FROM applications a 

@@ -18,9 +18,7 @@ if (!isset($_SESSION['user_id'])) {
 $user_id = $_SESSION['user_id'];
 
 // Fetch student_id associated with this user
-$stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
-$stmt->execute([$user_id]);
-$student_id = $stmt->fetchColumn();
+$student_id = getCurrentStudentId($pdo, (int) $user_id);
 
 if (!$student_id) {
     echo json_encode(['notifications' => [], 'unread_count' => 0]);

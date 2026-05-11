@@ -3,6 +3,7 @@ $base_path = dirname(__DIR__);
 require_once $base_path . '/includes/config.php';
 require_once $base_path . '/includes/db.php';
 require_once $base_path . '/includes/functions.php';
+portalSendPageCacheHeaders(180, isLoggedIn());
 
 // --- Filtering Logic ---
 $search = $_GET['search'] ?? '';
@@ -11,7 +12,7 @@ $categories_for_cache = $categories;
 sort($categories_for_cache);
 $cache_key = 'public.search_scholarships:' . sha1(json_encode([$search, $categories_for_cache]));
 
-$response = portalCacheRemember($cache_key, 60, function () use ($pdo, $search, $categories) {
+$response = portalCacheRemember($cache_key, 180, function () use ($pdo, $search, $categories) {
     $sql = "SELECT
                 s.id,
                 s.name,

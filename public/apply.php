@@ -116,51 +116,70 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 
 try {
     // 1. Get Student ID
-    $stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
-    $stmt->execute([$user_id]);
-    $student_id_check = $stmt->fetchColumn();
+    $student_id_check = getCurrentStudentId($pdo, $user_id);
 
     if ($student_id_check) {
-        // 2. Check for Active Scholarship (Restriction)
-        // Check if the student has an active-like scholarship for a DIFFERENT scholarship ID.
-        // We check the LATEST application for each scholarship to determine current status.
-        $stmt = $pdo->prepare("
-            SELECT a.id 
-            FROM applications a
-            WHERE a.student_id = ? 
-            AND a.scholarship_id != ?
-            AND a.id = (
-                SELECT MAX(sub.id) 
-                FROM applications sub 
-                WHERE sub.student_id = a.student_id 
-                AND sub.scholarship_id = a.scholarship_id
-            )
-            AND a.status IN ('Active', 'Approved', 'For Renewal', 'Renewal Request', 'Drop Requested')
+        // Bundle the expensive eligibility checks so repeat opens can reuse the cached result.
+        $restrictionCacheKey = 'public.apply.restrictions:' . $user_id . ':' . (int) $scholarship_id;
+        $restrictionState = portalCacheRemember($restrictionCacheKey, 120, function () use ($pdo, $student_id_check, $scholarship_id) {
+            $state = [
+                'conflicting_scholarship_exists' => false,
+                'can_renew' => false,
+                'existing_status' => null,
+            ];
 
-            LIMIT 1
-        ");
-        $stmt->execute([$student_id_check, $scholarship_id]);
-        $conflicting_scholarship_exists = $stmt->fetchColumn();
+            // Check if the student has an active-like scholarship for a DIFFERENT scholarship ID.
+            // We check the LATEST application for each scholarship to determine current status.
+            $stmt = $pdo->prepare("
+                SELECT a.id
+                FROM applications a
+                WHERE a.student_id = ?
+                AND a.scholarship_id != ?
+                AND a.id = (
+                    SELECT MAX(sub.id)
+                    FROM applications sub
+                    WHERE sub.student_id = a.student_id
+                    AND sub.scholarship_id = a.scholarship_id
+                )
+                AND a.status IN ('Active', 'Approved', 'For Renewal', 'Renewal Request', 'Drop Requested')
+                LIMIT 1
+            ");
+            $stmt->execute([$student_id_check, $scholarship_id]);
+            $state['conflicting_scholarship_exists'] = (bool) $stmt->fetchColumn();
 
-        // Check renewal eligibility: Can only renew if the LATEST status of THIS scholarship is Active/Approved
-        $stmt = $pdo->prepare("
-            SELECT COUNT(*) 
-            FROM applications a
-            WHERE a.student_id = ? 
-            AND a.scholarship_id = ? 
-            AND a.id = (
-                SELECT MAX(sub.id) 
-                FROM applications sub 
-                WHERE sub.student_id = a.student_id 
-                AND sub.scholarship_id = a.scholarship_id
-            )
-            AND (
-                a.status IN ('Active', 'Approved', 'For Renewal')
-                OR (a.status = 'Rejected' AND a.applicant_type = 'Renewal')
-            )
-        ");
-        $stmt->execute([$student_id_check, $scholarship_id]);
-        $can_renew = ($stmt->fetchColumn() > 0);
+            // Check renewal eligibility: Can only renew if the LATEST status of THIS scholarship is Active/Approved
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*)
+                FROM applications a
+                WHERE a.student_id = ?
+                AND a.scholarship_id = ?
+                AND a.id = (
+                    SELECT MAX(sub.id)
+                    FROM applications sub
+                    WHERE sub.student_id = a.student_id
+                    AND sub.scholarship_id = a.scholarship_id
+                )
+                AND (
+                    a.status IN ('Active', 'Approved', 'For Renewal')
+                    OR (a.status = 'Rejected' AND a.applicant_type = 'Renewal')
+                )
+            ");
+            $stmt->execute([$student_id_check, $scholarship_id]);
+            $state['can_renew'] = ((int) $stmt->fetchColumn() > 0);
+
+            // Only bother checking the duplicate application status when the user is actually allowed to proceed.
+            if (!$state['conflicting_scholarship_exists'] || $state['can_renew']) {
+                $stmt = $pdo->prepare("SELECT status FROM applications WHERE student_id = ? AND scholarship_id = ? AND status IN ('Pending', 'Under Review', 'Pending Exam', 'Renewal Request', 'Drop Requested') LIMIT 1");
+                $stmt->execute([$student_id_check, $scholarship_id]);
+                $state['existing_status'] = $stmt->fetchColumn() ?: null;
+            }
+
+            return $state;
+        });
+
+        $conflicting_scholarship_exists = !empty($restrictionState['conflicting_scholarship_exists']);
+        $can_renew = !empty($restrictionState['can_renew']);
+        $existing_status = $restrictionState['existing_status'] ?? null;
 
         // Block if a conflicting scholarship exists, UNLESS the student is renewing the current one.
         // This ensures students can always access their own renewal page, even if the system detects other active records.
@@ -193,17 +212,10 @@ try {
                     </div>
                 </div>
             </main>';
-        include $base_path . '/includes/footer.php';
-        echo '</body></html>';
-        exit();
+            include $base_path . '/includes/footer.php';
+            echo '</body></html>';
+            exit();
         }
-
-        // 3. Check for Duplicate/Pending Applications for THIS scholarship
-        // Prevent multiple pending applications for the same scholarship.
-        $stmt = $pdo->prepare("SELECT status FROM applications WHERE student_id = ? AND scholarship_id = ? AND status IN ('Pending', 'Under Review', 'Pending Exam', 'Renewal Request', 'Drop Requested') LIMIT 1");
-        $stmt->execute([$student_id_check, $scholarship_id]);
-        $existing_status = $stmt->fetchColumn();
-
         if ($existing_status) {
             $page_title = 'Application Already Submitted';
             ?>
@@ -461,22 +473,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $gwa = filter_input(INPUT_POST, 'gwa', FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION);
 
     // Get the student ID associated with the logged-in user.
-    $student_id = null;
+    $student_id = getCurrentStudentId($pdo, (int) $user_id);
     try {
-        // 1. Check if a student record already exists for this user.
-        $stmt = $pdo->prepare("SELECT id, school_id_number FROM students WHERE user_id = ?");
-        $stmt->execute([$user_id]);
-        $student = $stmt->fetch();
-
-        if ($student) { // Found a student record linked to this user
-            $student_id = $student['id'];
-
+        if ($student_id) { // Found a student record linked to this user
             // --- Data Synchronization ---
             // Always update the student record with the latest from the users table before applying.
             // This ensures data consistency across the system.
             $user_sync_stmt = $pdo->prepare("
-                SELECT first_name, middle_name, last_name, school_id, email, contact_number, birthdate 
-                FROM users 
+                SELECT first_name, middle_name, last_name, school_id, email, contact_number, birthdate
+                FROM users
                 WHERE id = ?
             ");
             $user_sync_stmt->execute([$user_id]);
@@ -484,29 +489,29 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             
             if ($user_data_sync) {
                 $full_name_sync = trim(
-                    ($user_data_sync['first_name'] ?? '') . ' ' . 
-                    ($user_data_sync['middle_name'] ?? '') . ' ' . 
+                    ($user_data_sync['first_name'] ?? '') . ' ' .
+                    ($user_data_sync['middle_name'] ?? '') . ' ' .
                     ($user_data_sync['last_name'] ?? '')
                 );
                 $full_name_sync = preg_replace('/\s+/', ' ', $full_name_sync); // Remove extra spaces
-                $school_id_sync = !empty($user_data_sync['school_id']) ? $user_data_sync['school_id'] : NULL;
+                $school_id_sync = !empty($user_data_sync['school_id']) ? $user_data_sync['school_id'] : null;
 
                 $update_student_stmt = $pdo->prepare(
-                    "UPDATE students SET 
-                        student_name = ?, 
-                        school_id_number = ?, 
-                        email = ?, 
-                        phone = ?, 
+                    "UPDATE students SET
+                        student_name = ?,
+                        school_id_number = ?,
+                        email = ?,
+                        phone = ?,
                         date_of_birth = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?"
                 );
                 $update_student_stmt->execute([
-                    $full_name_sync, 
-                    $school_id_sync, 
-                    $user_data_sync['email'], 
-                    $user_data_sync['contact_number'], 
-                    $user_data_sync['birthdate'], 
+                    $full_name_sync,
+                    $school_id_sync,
+                    $user_data_sync['email'],
+                    $user_data_sync['contact_number'],
+                    $user_data_sync['birthdate'],
                     $student_id
                 ]);
             }
@@ -515,8 +520,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         } else {
             // No student record is linked to this user_id. Let's create one.
             $user_stmt = $pdo->prepare("
-                SELECT first_name, middle_name, last_name, school_id, email, contact_number, birthdate 
-                FROM users 
+                SELECT first_name, middle_name, last_name, school_id, email, contact_number, birthdate
+                FROM users
                 WHERE id = ?
             ");
             $user_stmt->execute([$user_id]);
@@ -524,25 +529,30 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             if ($user_data) {
                 $full_name = trim(
-                    ($user_data['first_name'] ?? '') . ' ' . 
-                    ($user_data['middle_name'] ?? '') . ' ' . 
+                    ($user_data['first_name'] ?? '') . ' ' .
+                    ($user_data['middle_name'] ?? '') . ' ' .
                     ($user_data['last_name'] ?? '')
                 );
                 $full_name = preg_replace('/\s+/', ' ', $full_name); // Remove extra spaces
-                $school_id_for_student = !empty($user_data['school_id']) ? $user_data['school_id'] : NULL;
+                $school_id_for_student = !empty($user_data['school_id']) ? $user_data['school_id'] : null;
                 
                 $student_id = dbExecuteInsert(
                     $pdo,
                     "INSERT INTO students (user_id, student_name, school_id_number, email, phone, date_of_birth) VALUES (?, ?, ?, ?, ?, ?)",
                     [
-                    $user_id, 
-                    $full_name, 
-                    $school_id_for_student,
-                    $user_data['email'],
-                    $user_data['contact_number'],
-                    $user_data['birthdate']
+                        $user_id,
+                        $full_name,
+                        $school_id_for_student,
+                        $user_data['email'],
+                        $user_data['contact_number'],
+                        $user_data['birthdate']
                     ]
                 );
+
+                if ($student_id) {
+                    $_SESSION['student_id'] = (int) $student_id;
+                    portalCacheSet('student.id:' . (int) $user_id, (int) $student_id, 300);
+                }
             } else {
                 $errors[] = "Could not retrieve user information for student record creation.";
             }

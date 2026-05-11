@@ -8,10 +8,11 @@ require_once $base_path . '/includes/db.php';
 require_once $base_path . '/includes/functions.php';
 
 checkSessionTimeout();
+portalSendPageCacheHeaders(300, isLoggedIn());
 
 $page_title = 'Announcements';
 
-$announcements = portalCacheRemember('public.announcements.list', 60, function () use ($pdo) {
+$announcements = portalCacheRemember('public.announcements.list', 300, function () use ($pdo) {
     try {
         $stmt = $pdo->query("SELECT id, title, content, is_active, created_at, updated_at, image_path FROM announcements WHERE is_active = 1 ORDER BY created_at DESC");
         $announcements = $stmt->fetchAll(PDO::FETCH_ASSOC);

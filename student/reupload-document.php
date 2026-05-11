@@ -24,9 +24,7 @@ $generic_reupload_mode = false;
 $errors = [];
 
 try {
-    $student_stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ? LIMIT 1");
-    $student_stmt->execute([$user_id]);
-    $student_id = (int) $student_stmt->fetchColumn();
+    $student_id = (int) (getCurrentStudentId($pdo, $user_id) ?? 0);
 
     if ($student_id) {
         $application_id = filter_input(INPUT_GET, 'application_id', FILTER_SANITIZE_NUMBER_INT);

@@ -9,6 +9,7 @@ require_once $base_path . '/includes/db.php';
 require_once $base_path . '/includes/functions.php';
 
 checkSessionTimeout();
+portalSendPageCacheHeaders(300, isLoggedIn());
 
 // --- Applicant Type Filtering for Logged-in Users ---
 $user_is_logged_in = isset($_SESSION['user_id']);
@@ -23,7 +24,7 @@ $categories_for_cache = $categories;
 sort($categories_for_cache);
 $cache_key = 'public.scholarships:' . sha1(json_encode([$search, $categories_for_cache]));
 
-$scholarships = portalCacheRemember($cache_key, 60, function () use ($pdo, $search, $categories) {
+$scholarships = portalCacheRemember($cache_key, 300, function () use ($pdo, $search, $categories) {
     $sql = "SELECT
                 s.id,
                 s.name,
@@ -95,6 +96,9 @@ $page_title = 'All Scholarships';
     <?php include dirname(__DIR__) . '/includes/favicon.php'; ?>
     <!-- Custom CSS -->
     <link rel="stylesheet" href="assets/css/style.css">
+    <?php foreach (array_slice($scholarships, 0, 6) as $prefetchScholarship): ?>
+        <link rel="prefetch" href="scholarship-details.php?id=<?php echo (int) $prefetchScholarship['id']; ?>" as="document">
+    <?php endforeach; ?>
 </head>
 <body>
     <?php include $base_path . '/public/header.php'; ?>

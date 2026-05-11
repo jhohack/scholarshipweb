@@ -27,13 +27,10 @@ $review_action = null;
 $student_id = null;
 
 try {
-    // First, get the student_id from the user_id
-    $student_stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
-    $student_stmt->execute([$user_id]);
-    $student = $student_stmt->fetch();
+    // Reuse the student ID cached in the session when available.
+    $student_id = getCurrentStudentId($pdo, (int) $user_id);
 
-    if ($student) {
-        $student_id = $student['id'];
+    if ($student_id) {
 
         // --- New Core Logic: Get the single most recent application status to ensure accuracy ---
         $latest_app_stmt = $pdo->prepare("

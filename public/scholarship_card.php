@@ -40,6 +40,6 @@ $btn_text = isset($card_button_text) ? $card_button_text : 'View Details';
                 <div class="text-muted">Slots</div>
             </div>
         </div>
-        <a href="<?php echo htmlspecialchars($details_link); ?>" class="btn btn-primary w-100 mt-auto"><?php echo htmlspecialchars($btn_text); ?></a>
+        <a href="<?php echo htmlspecialchars($details_link); ?>" class="btn btn-primary w-100 mt-auto" data-prefetch="hover"><?php echo htmlspecialchars($btn_text); ?></a>
     </div>
 </div>

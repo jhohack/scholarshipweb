@@ -9,9 +9,7 @@ checkSessionTimeout();
 if (!isStudent()) { header("Location: ../public/login.php"); exit(); }
 
 $user_id = $_SESSION['user_id'];
-$stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
-$stmt->execute([$user_id]);
-$student_id = $stmt->fetchColumn();
+$student_id = getCurrentStudentId($pdo, (int) $user_id);
 
 // Fetch Applications for Dropdown
 $apps = getStudentApplications($pdo, $user_id);

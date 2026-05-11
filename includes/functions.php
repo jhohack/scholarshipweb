@@ -82,6 +82,51 @@ if (!function_exists('isAdmin')) {
     }
 }
 
+if (!function_exists('getCurrentStudentId')) {
+    function getCurrentStudentId(PDO $pdo, ?int $user_id = null): ?int
+    {
+        if (isset($_SESSION['student_id']) && (int) $_SESSION['student_id'] > 0) {
+            return (int) $_SESSION['student_id'];
+        }
+
+        $user_id = $user_id ?? (isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null);
+        if (!$user_id) {
+            return null;
+        }
+
+        $cacheKey = 'student.id:' . (int) $user_id;
+        $student_id = portalCacheRemember($cacheKey, 300, function () use ($pdo, $user_id) {
+            $stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ? LIMIT 1");
+            $stmt->execute([(int) $user_id]);
+            $id = (int) $stmt->fetchColumn();
+            return $id > 0 ? $id : null;
+        });
+
+        if ($student_id) {
+            $_SESSION['student_id'] = (int) $student_id;
+            return (int) $student_id;
+        }
+
+        return null;
+    }
+}
+
+if (!function_exists('portalSendPageCacheHeaders')) {
+    function portalSendPageCacheHeaders(int $ttlSeconds, bool $private = false): void
+    {
+        if (headers_sent()) {
+            return;
+        }
+
+        $ttlSeconds = max(1, $ttlSeconds);
+        $staleWindow = max(30, $ttlSeconds);
+        $scope = $private ? 'private' : 'public';
+
+        header(sprintf('Cache-Control: %s, max-age=%d, stale-while-revalidate=%d', $scope, $ttlSeconds, $staleWindow));
+        header('Vary: Cookie');
+    }
+}
+
 /**
  * Get the current user's role.
  *
@@ -235,9 +280,7 @@ function displayFlashMessages() {
  */
 function getStudentApplications($pdo, $user_id) {
     // Get the student ID linked to the user account
-    $stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
-    $stmt->execute([$user_id]);
-    $student_id = $stmt->fetchColumn();
+    $student_id = getCurrentStudentId($pdo, (int) $user_id);
 
     if (!$student_id) {
         return [];

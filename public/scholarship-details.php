@@ -9,6 +9,7 @@ require_once $base_path . '/includes/db.php';
 require_once $base_path . '/includes/functions.php';
 
 checkSessionTimeout();
+portalSendPageCacheHeaders(300, isLoggedIn());
 
 $scholarship_id = filter_input(INPUT_GET, 'id', FILTER_SANITIZE_NUMBER_INT);
 if (!$scholarship_id) {
@@ -19,31 +20,32 @@ if (!$scholarship_id) {
 // Check if user is a renewal applicant (to allow access to inactive/closed scholarships)
 $is_renewal_applicant = false;
 if (isset($_SESSION['user_id'])) {
-    $u_stmt = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
-    $u_stmt->execute([$_SESSION['user_id']]);
-    $sid = $u_stmt->fetchColumn();
+    $sid = getCurrentStudentId($pdo, (int) $_SESSION['user_id']);
     if ($sid) {
-        // Only consider the student a 'Renewal Applicant' if their LATEST application is Active/Approved.
-        // If they were Dropped/Rejected, they should start over as a New Applicant.
-        $r_stmt = $pdo->prepare("
-            SELECT COUNT(*) 
-            FROM applications a
-            WHERE a.student_id = ? 
-            AND a.scholarship_id = ? 
-            AND a.id = (
-                SELECT MAX(sub.id) 
-                FROM applications sub 
-                WHERE sub.student_id = a.student_id 
-                AND sub.scholarship_id = a.scholarship_id
-            )
-            AND a.status IN ('Active', 'Approved', 'For Renewal')
-        ");
-        $r_stmt->execute([$sid, $scholarship_id]);
-        $is_renewal_applicant = ($r_stmt->fetchColumn() > 0);
+        $renewalCacheKey = 'public.scholarship.renewal:' . (int) $sid . ':' . (int) $scholarship_id;
+        $is_renewal_applicant = portalCacheRemember($renewalCacheKey, 300, function () use ($pdo, $sid, $scholarship_id) {
+            // Only consider the student a 'Renewal Applicant' if their LATEST application is Active/Approved.
+            // If they were Dropped/Rejected, they should start over as a New Applicant.
+            $r_stmt = $pdo->prepare("
+                SELECT COUNT(*)
+                FROM applications a
+                WHERE a.student_id = ?
+                AND a.scholarship_id = ?
+                AND a.id = (
+                    SELECT MAX(sub.id)
+                    FROM applications sub
+                    WHERE sub.student_id = a.student_id
+                    AND sub.scholarship_id = a.scholarship_id
+                )
+                AND a.status IN ('Active', 'Approved', 'For Renewal')
+            ");
+            $r_stmt->execute([$sid, $scholarship_id]);
+            return ($r_stmt->fetchColumn() > 0);
+        });
     }
 }
 
-$scholarship = portalCacheRemember('public.scholarship:' . (int) $scholarship_id, 60, function () use ($pdo, $scholarship_id) {
+$scholarship = portalCacheRemember('public.scholarship:' . (int) $scholarship_id, 300, function () use ($pdo, $scholarship_id) {
     try {
         $stmt = $pdo->prepare("SELECT * FROM scholarships WHERE id = ?");
         $stmt->execute([$scholarship_id]);

@@ -44,6 +44,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                      $_SESSION['role'] = $user['role'];
                      $_SESSION['last_activity'] = time(); // Reset session timer to prevent immediate timeout
                      $_SESSION['profile_picture_path'] = $user['profile_picture_path'];
+                     $student_id = getCurrentStudentId($pdo, (int) $user['id']);
+                     if ($student_id) {
+                         $_SESSION['student_id'] = $student_id;
+                     } else {
+                         unset($_SESSION['student_id']);
+                     }
      
                      // Redirect to the intended page or the student dashboard
                      $redirect_url = $_SESSION['redirect_url'] ?? '../student/dashboard.php';
