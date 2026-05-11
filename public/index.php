@@ -140,12 +140,6 @@ $page_title = 'DVC Scholarship Hub';
     <title><?php echo htmlspecialchars($page_title); ?></title>
    
     <?php include dirname(__DIR__) . '/includes/favicon.php'; ?>
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- AOS (Animate on Scroll) CSS -->
-    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <!-- Custom CSS -->
     <link rel="stylesheet" href="assets/css/style.css">
     <style>

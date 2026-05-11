@@ -1,9 +1,9 @@
     </main>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="../public/assets/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="../public/assets/vendor/aos/aos.js"></script>
+    <script src="../public/assets/vendor/chartjs/chart.umd.min.js"></script>
     <script>
         // Initialize Animate on Scroll
         AOS.init({

@@ -33,17 +33,10 @@ $manifest_config = [
     'theme_color' => '#0d6efd'
 ];
 ?>
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link rel="dns-prefetch" href="//cdn.jsdelivr.net">
-<link rel="preconnect" href="https://unpkg.com" crossorigin>
-<link rel="dns-prefetch" href="//unpkg.com">
-<?php if ($is_public_area): ?>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="dns-prefetch" href="//fonts.googleapis.com">
-<link rel="dns-prefetch" href="//fonts.gstatic.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap">
-<?php endif; ?>
+<link rel="stylesheet" href="<?php echo htmlspecialchars($public_base_url . '/assets/vendor/bootstrap/bootstrap.min.css', ENT_QUOTES, 'UTF-8'); ?>">
+<link rel="stylesheet" href="<?php echo htmlspecialchars($public_base_url . '/assets/vendor/bootstrap-icons/font/bootstrap-icons.css', ENT_QUOTES, 'UTF-8'); ?>">
+<link rel="stylesheet" href="<?php echo htmlspecialchars($public_base_url . '/assets/vendor/aos/aos.css', ENT_QUOTES, 'UTF-8'); ?>">
+<link rel="stylesheet" href="<?php echo htmlspecialchars($public_base_url . '/assets/vendor/poppins/poppins.css', ENT_QUOTES, 'UTF-8'); ?>">
 <link rel="icon" href="<?php echo $favicon_href; ?>" type="image/svg+xml" sizes="any">
 <link rel="apple-touch-icon" href="<?php echo $favicon_href; ?>">
 <meta name="theme-color" content="#0d6efd">

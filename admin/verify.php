@@ -129,8 +129,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Verification - Scholarship Hub</title>
     <?php include dirname(__DIR__) . '/includes/favicon.php'; ?>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <link rel="stylesheet" href="admin_style.css">
     <style>
         body {
@@ -194,7 +192,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
             </div>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="../public/assets/vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script>
         // Add a cooldown to the resend button to prevent spam
         const resendForm = document.getElementById('resend-form');
