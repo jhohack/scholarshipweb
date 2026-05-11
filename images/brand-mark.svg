@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="DVC Scholarship Portal">
+  <defs>
+    <linearGradient id="brandGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d6efd"/>
+      <stop offset="100%" stop-color="#052c65"/>
+    </linearGradient>
+    <linearGradient id="brandAccent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#dbeafe"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="118" fill="url(#brandGradient)"/>
+  <circle cx="256" cy="176" r="118" fill="#ffffff" fill-opacity="0.08"/>
+  <path d="M126 210L256 142l130 68-130 68-130-68Z" fill="url(#brandAccent)"/>
+  <path d="M180 232v58c0 25 34 46 76 46s76-21 76-46v-58l-76 40-76-40Z" fill="none" stroke="url(#brandAccent)" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M386 210v66" fill="none" stroke="url(#brandAccent)" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="386" cy="286" r="14" fill="url(#brandAccent)"/>
+  <text x="256" y="390" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="72" font-weight="800" letter-spacing="6" fill="#ffffff">DVC</text>
+  <text x="256" y="438" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" letter-spacing="2.5" fill="#ffffff" fill-opacity="0.85">SCHOLARSHIP</text>
+</svg>

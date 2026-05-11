@@ -11,9 +11,6 @@ if ((isset($_COOKIE['scholarship_admin']) || isset($_GET['scholarship_admin'])) 
 }
 
 $unread_messages = 0;
-if (isset($_SESSION['user_id']) && isset($_SESSION['role']) && $_SESSION['role'] === 'student') {
-    $unread_messages = getUnreadMessageCount($pdo, $_SESSION['user_id']);
-}
 
 $disable_unread_polling = in_array($current_page, ['apply.php', 'entrance-exam.php'], true);
 ?>
@@ -156,7 +153,27 @@ $disable_unread_polling = in_array($current_page, ['apply.php', 'entrance-exam.p
                     .catch(err => console.error('Notification poll error', err));
             }
 
-            setInterval(updateUnreadCount, 5000); // Poll every 5 seconds
+            let unreadPollTimer = null;
+
+            function startUnreadPolling() {
+                if (unreadPollTimer) {
+                    clearInterval(unreadPollTimer);
+                }
+
+                if (document.hidden) {
+                    return;
+                }
+
+                updateUnreadCount();
+                unreadPollTimer = setInterval(() => {
+                    if (!document.hidden) {
+                        updateUnreadCount();
+                    }
+                }, 15000);
+            }
+
+            document.addEventListener('visibilitychange', startUnreadPolling);
+            startUnreadPolling();
         });
     </script>
     <?php endif; ?>

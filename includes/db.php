@@ -5,7 +5,7 @@ try {
     $options = [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
+        PDO::ATTR_EMULATE_PREPARES => defined('DB_DRIVER') && DB_DRIVER === 'pgsql' && (int) DB_PORT === 6543,
     ];
 
     if (defined('DB_DRIVER') && DB_DRIVER === 'pgsql') {
@@ -50,8 +50,4 @@ try {
 }
 
 require_once __DIR__ . '/db_schema.php';
-
-if (function_exists('dbEnsureUserStudentSyncSchema')) {
-    dbEnsureUserStudentSyncSchema($pdo);
-}
 ?>

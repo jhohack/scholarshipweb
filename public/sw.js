@@ -1,10 +1,12 @@
-const CACHE_NAME = 'dvc-portal-v1';
+const CACHE_NAME = 'dvc-portal-v2';
 const APP_SHELL = [
   './',
   './index.php',
   './assets/css/style.css',
   './assets/js/app.js',
-  './images/dvclogo.png'
+  './assets/images/hero-illustration.svg',
+  '../images/brand-mark.svg',
+  './manifest.json'
 ];
 
 self.addEventListener('install', (event) => {

@@ -23,7 +23,7 @@ if (!function_exists('env_config')) {
 }
 
 if (!function_exists('loadLocalEnvFile')) {
-    function loadLocalEnvFile(string $path): void
+    function loadLocalEnvFile(string $path, bool $overrideExisting = true): void
     {
         if (!is_file($path) || !is_readable($path)) {
             return;
@@ -56,6 +56,13 @@ if (!function_exists('loadLocalEnvFile')) {
                 continue;
             }
 
+            if (!$overrideExisting) {
+                $existingValue = $_ENV[$name] ?? $_SERVER[$name] ?? getenv($name);
+                if ($existingValue !== false && $existingValue !== null && $existingValue !== '') {
+                    continue;
+                }
+            }
+
             $valueLength = strlen($value);
             if ($valueLength >= 2) {
                 $first = $value[0];
@@ -72,7 +79,8 @@ if (!function_exists('loadLocalEnvFile')) {
     }
 }
 
-loadLocalEnvFile(dirname(__DIR__) . '/.env');
+loadLocalEnvFile(dirname(__DIR__) . '/.env', false);
+loadLocalEnvFile(dirname(__DIR__) . '/.env.local');
 
 $httpHost = $_SERVER['HTTP_HOST'] ?? '';
 $isLocalHost = $httpHost === '' || strpos($httpHost, 'localhost') === 0 || strpos($httpHost, '127.0.0.1') === 0;
@@ -100,8 +108,42 @@ if ($httpHost === 'dvc.infinityfree.me' && env_config('DB_HOST') === null) {
     $legacyBaseUrl = $derivedBaseUrl;
 }
 
+$supabaseProjectId = env_config('SUPABASE_PROJECT_ID', '');
+$supabaseProjectUrl = $supabaseProjectId !== ''
+    ? 'https://' . $supabaseProjectId . '.supabase.co'
+    : env_config('SUPABASE_URL', '');
+$supabaseDbHost = env_config(
+    'SUPABASE_DB_HOST',
+    $supabaseProjectId !== '' ? 'aws-1-ap-southeast-1.pooler.supabase.com' : ''
+);
+$supabaseDbName = env_config(
+    'SUPABASE_DB_NAME',
+    $supabaseProjectId !== '' ? 'postgres' : ''
+);
+$supabaseDbUser = env_config(
+    'SUPABASE_DB_USER',
+    $supabaseProjectId !== '' ? 'postgres.' . $supabaseProjectId : ''
+);
+$supabaseDbPort = (int) env_config(
+    'SUPABASE_DB_PORT',
+    $supabaseProjectId !== '' ? 6543 : 0
+);
+
+$supabaseDatabaseUrl = env_config(
+    'SUPABASE_DB_URL',
+    env_config('SUPABASE_DATABASE_URL', null)
+);
+$databaseUrl = env_config(
+    'DB_URL',
+    env_config(
+        'DATABASE_URL',
+        env_config(
+            'POSTGRES_URL',
+            $supabaseDatabaseUrl
+        )
+    )
+);
 $parsedDatabaseUrl = null;
-$databaseUrl = env_config('DB_URL', env_config('DATABASE_URL', env_config('POSTGRES_URL', null)));
 if ($databaseUrl) {
     $parsedUrl = @parse_url($databaseUrl);
     if (is_array($parsedUrl) && !empty($parsedUrl['host'])) {
@@ -125,26 +167,29 @@ if ($databaseUrl) {
     }
 }
 
-$resolvedDbDriver = strtolower((string) env_config('DB_DRIVER', $parsedDatabaseUrl['driver'] ?? 'mysql'));
+$resolvedDbDriver = strtolower((string) env_config(
+    'DB_DRIVER',
+    $parsedDatabaseUrl['driver'] ?? (($supabaseProjectId !== '' || $supabaseDatabaseUrl !== null) ? 'pgsql' : 'mysql')
+));
 $resolvedDbHost = env_config(
     'DB_HOST',
     env_config(
         $resolvedDbDriver === 'pgsql' ? 'PGHOST' : 'MYSQL_HOST',
-        $parsedDatabaseUrl['host'] ?? $legacyDbHost
+        $parsedDatabaseUrl['host'] ?? ($supabaseDbHost !== '' ? $supabaseDbHost : $legacyDbHost)
     )
 );
 $resolvedDbName = env_config(
     'DB_NAME',
     env_config(
         $resolvedDbDriver === 'pgsql' ? 'PGDATABASE' : 'MYSQL_DATABASE',
-        $parsedDatabaseUrl['name'] ?? $legacyDbName
+        $parsedDatabaseUrl['name'] ?? ($supabaseDbName !== '' ? $supabaseDbName : $legacyDbName)
     )
 );
 $resolvedDbUser = env_config(
     'DB_USER',
     env_config(
         $resolvedDbDriver === 'pgsql' ? 'PGUSER' : 'MYSQL_USER',
-        $parsedDatabaseUrl['user'] ?? $legacyDbUser
+        $parsedDatabaseUrl['user'] ?? ($supabaseDbUser !== '' ? $supabaseDbUser : $legacyDbUser)
     )
 );
 $resolvedDbPass = env_config(
@@ -158,31 +203,22 @@ $resolvedDbPort = (int) env_config(
     'DB_PORT',
     env_config(
         $resolvedDbDriver === 'pgsql' ? 'PGPORT' : 'MYSQL_PORT',
-        $parsedDatabaseUrl['port'] ?? ($resolvedDbDriver === 'pgsql' ? 5432 : 3306)
+        $parsedDatabaseUrl['port'] ?? ($supabaseDbPort !== 0 ? $supabaseDbPort : ($resolvedDbDriver === 'pgsql' ? 5432 : 3306))
     )
 );
 $resolvedDbSslMode = env_config(
     'DB_SSL_MODE',
-    $parsedDatabaseUrl['sslmode'] ?? ($resolvedDbDriver === 'pgsql' && !$isLocalHost ? 'require' : '')
+    $parsedDatabaseUrl['sslmode'] ?? (($resolvedDbDriver === 'pgsql' && (!$isLocalHost || $supabaseProjectId !== '' || $supabaseDatabaseUrl !== null)) ? 'require' : '')
 );
 $resolvedDbChannelBinding = env_config(
     'DB_CHANNEL_BINDING',
-    ''
+    $parsedDatabaseUrl['channel_binding'] ?? ''
 );
-$resolvedDbNeonEndpoint = env_config('DB_NEON_ENDPOINT', '');
-if ($resolvedDbNeonEndpoint === '' && $resolvedDbDriver === 'pgsql' && is_string($resolvedDbHost)) {
-    if (preg_match('/^([^.]+)\..*\\.neon\\.tech$/i', $resolvedDbHost, $matches)) {
-        $resolvedDbNeonEndpoint = preg_replace('/-pooler$/i', '', $matches[1]);
-    }
-}
 
 $resolvedDbPgOptions = env_config(
     'DB_PG_OPTIONS',
     $parsedDatabaseUrl['options'] ?? ''
 );
-if ($resolvedDbPgOptions === '' && $resolvedDbNeonEndpoint !== '') {
-    $resolvedDbPgOptions = 'endpoint=' . $resolvedDbNeonEndpoint;
-}
 
 define('DB_DRIVER', $resolvedDbDriver);
 define('DB_HOST', $resolvedDbHost);
@@ -192,8 +228,9 @@ define('DB_PASS', $resolvedDbPass);
 define('DB_PORT', $resolvedDbPort);
 define('DB_SSL_MODE', $resolvedDbSslMode);
 define('DB_CHANNEL_BINDING', $resolvedDbChannelBinding);
-define('DB_NEON_ENDPOINT', $resolvedDbNeonEndpoint);
 define('DB_PG_OPTIONS', $resolvedDbPgOptions);
+define('SUPABASE_PROJECT_ID', $supabaseProjectId);
+define('SUPABASE_PROJECT_URL', $supabaseProjectUrl);
 define('BASE_URL', rtrim(env_config('BASE_URL', $legacyBaseUrl), '/'));
 
 define('GOOGLE_CLIENT_ID', env_config('GOOGLE_CLIENT_ID', '127649949023-se8oo6060ho0amkk852h2lk0atms23vj.apps.googleusercontent.com'));

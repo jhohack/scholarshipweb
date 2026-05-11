@@ -13,69 +13,121 @@ $current_page = basename($_SERVER['PHP_SELF']);
 // Check if a user is logged in. If so, hide the CTA.
 $is_user_logged_in = isset($_SESSION['user_id']);
 
-// --- Migration: Keep scholarship columns aligned across MySQL/Postgres ---
-dbEnsureScholarshipColumns($pdo);
-
-// Fetch featured scholarships from the same pool used in scholarships.php
-try {
-    $sql = "SELECT s.* FROM scholarships s";
-    $whereClauses = [];
-    $params = [];
-
-    // Match scholarships page rules
-    $whereClauses[] = "s.status = 'active'";
-    $whereClauses[] = "(s.requires_exam = 0 OR (s.requires_exam = 1 AND EXISTS (SELECT 1 FROM exam_questions eq WHERE eq.scholarship_id = s.id)))";
-
-    if (!empty($whereClauses)) {
-        $sql .= " WHERE " . implode(' AND ', $whereClauses);
-    }
-
-    $sql .= " ORDER BY s.deadline ASC LIMIT 6";
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $scholarships = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
+$indexPayload = portalCacheRemember('public.index.payload', 60, function () use ($pdo) {
     $scholarships = [];
-    // Log error in production
-}
-
-// Fetch the latest 3 active announcements
-try {
-    $announcements_stmt = $pdo->query("SELECT id, title, content, created_at FROM announcements WHERE is_active = 1 ORDER BY created_at DESC LIMIT 3");
-    $announcements = $announcements_stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // Fetch attachments for these announcements
-    foreach ($announcements as &$ann) {
-        $stmt_att = $pdo->prepare("SELECT file_path, file_name FROM announcement_attachments WHERE announcement_id = ?");
-        $stmt_att->execute([$ann['id']]);
-        $ann['attachments'] = $stmt_att->fetchAll(PDO::FETCH_ASSOC);
-    }
-    unset($ann); // Break reference
-} catch (PDOException $e) {
     $announcements = [];
-    // Log error in production
-}
+    $trust_stats = [
+        'scholarships' => 0,
+        'students' => 0,
+        'success_rate' => 0,
+    ];
 
-// --- Fetch Trust Badge Stats ---
-$trust_stats = [
+    try {
+        $sql = "SELECT
+                    s.id,
+                    s.name,
+                    s.category,
+                    s.amount,
+                    s.amount_type,
+                    s.deadline,
+                    s.available_slots,
+                    s.description,
+                    s.requirements
+                FROM scholarships s";
+        $whereClauses = [];
+        $params = [];
+
+        $whereClauses[] = "s.status = 'active'";
+        $whereClauses[] = "(s.requires_exam = 0 OR (s.requires_exam = 1 AND EXISTS (SELECT 1 FROM exam_questions eq WHERE eq.scholarship_id = s.id)))";
+
+        if (!empty($whereClauses)) {
+            $sql .= " WHERE " . implode(' AND ', $whereClauses);
+        }
+
+        $sql .= " ORDER BY s.deadline ASC LIMIT 6";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $scholarships = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        $scholarships = [];
+    }
+
+    try {
+        $announcements_stmt = $pdo->query("SELECT id, title, content, created_at FROM announcements WHERE is_active = 1 ORDER BY created_at DESC LIMIT 3");
+        $announcements = $announcements_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $attachmentsByAnnouncement = [];
+        $announcementIds = array_map(static function ($announcement) {
+            return (int) ($announcement['id'] ?? 0);
+        }, $announcements);
+        $announcementIds = array_values(array_filter($announcementIds));
+
+        if (!empty($announcementIds)) {
+            $placeholders = implode(',', array_fill(0, count($announcementIds), '?'));
+            $attachments_stmt = $pdo->prepare("
+                SELECT announcement_id, file_path, file_name
+                FROM announcement_attachments
+                WHERE announcement_id IN ({$placeholders})
+                ORDER BY id ASC
+            ");
+            $attachments_stmt->execute($announcementIds);
+            foreach ($attachments_stmt->fetchAll(PDO::FETCH_ASSOC) as $attachment) {
+                $announcementId = (int) ($attachment['announcement_id'] ?? 0);
+                if ($announcementId <= 0) {
+                    continue;
+                }
+
+                $attachmentsByAnnouncement[$announcementId][] = $attachment;
+            }
+        }
+
+        foreach ($announcements as &$ann) {
+            $annId = (int) ($ann['id'] ?? 0);
+            $ann['attachments'] = $attachmentsByAnnouncement[$annId] ?? [];
+        }
+        unset($ann);
+    } catch (PDOException $e) {
+        $announcements = [];
+    }
+
+    try {
+        $stats_stmt = $pdo->query("
+            SELECT
+                (SELECT COUNT(*) FROM scholarships WHERE status = 'active') AS scholarships,
+                (SELECT COUNT(*) FROM students) AS students,
+                COUNT(*) AS total_apps,
+                SUM(CASE WHEN status IN ('Approved', 'Active') THEN 1 ELSE 0 END) AS approved_apps
+            FROM applications
+        ");
+        $stats_row = $stats_stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $trust_stats['scholarships'] = (int) ($stats_row['scholarships'] ?? 0);
+        $trust_stats['students'] = (int) ($stats_row['students'] ?? 0);
+        $total_apps = (int) ($stats_row['total_apps'] ?? 0);
+        $approved_apps = (int) ($stats_row['approved_apps'] ?? 0);
+
+        if ($total_apps > 0) {
+            $trust_stats['success_rate'] = round(($approved_apps / $total_apps) * 100);
+        }
+    } catch (PDOException $e) {
+        // Ignore errors, defaults will display 0
+    }
+
+    return [
+        'scholarships' => $scholarships,
+        'announcements' => $announcements,
+        'trust_stats' => $trust_stats,
+    ];
+});
+
+$scholarships = $indexPayload['scholarships'] ?? [];
+$announcements = $indexPayload['announcements'] ?? [];
+$trust_stats = $indexPayload['trust_stats'] ?? [
     'scholarships' => 0,
     'students' => 0,
-    'success_rate' => 0
+    'success_rate' => 0,
 ];
-try {
-    $trust_stats['scholarships'] = $pdo->query("SELECT COUNT(*) FROM scholarships WHERE status = 'active'")->fetchColumn();
-    $trust_stats['students'] = $pdo->query("SELECT COUNT(*) FROM students")->fetchColumn();
-    
-    $total_apps = $pdo->query("SELECT COUNT(*) FROM applications")->fetchColumn();
-    $approved_apps = $pdo->query("SELECT COUNT(*) FROM applications WHERE status IN ('Approved', 'Active')")->fetchColumn();
-    
-    if ($total_apps > 0) {
-        $trust_stats['success_rate'] = round(($approved_apps / $total_apps) * 100);
-    }
-} catch (PDOException $e) {
-    // Ignore errors, defaults will display 0
-}
 
 // HTML output
 $page_title = 'DVC Scholarship Hub';
@@ -94,8 +146,6 @@ $page_title = 'DVC Scholarship Hub';
     <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <!-- Swiper.js CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/swiper/swiper-bundle.min.css" />
     <!-- Custom CSS -->
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
@@ -254,7 +304,7 @@ $page_title = 'DVC Scholarship Hub';
             <div class="container">
                 <div class="row align-items-center g-5">
                     <div class="col-lg-6" data-aos="fade-right">
-                        <img src="https://images.unsplash.com/photo-1523240795612-9a054b0db644?q=80&w=2070&auto=format&fit=crop" class="img-fluid rounded shadow-lg" alt="Students studying together">
+                        <img src="assets/images/hero-illustration.svg" class="img-fluid rounded shadow-lg" alt="Students studying together" loading="lazy" decoding="async">
                     </div>
                     <div class="col-lg-6" data-aos="fade-left" data-aos-delay="100">
                         <h2 class="fw-bold mb-4">Your Direct Path to Funding</h2>
@@ -349,7 +399,7 @@ $page_title = 'DVC Scholarship Hub';
                                     ?>
                                     <div class="ratio ratio-16x9 bg-light">
                                         <?php if($img_src): ?>
-                                            <img src="<?php echo htmlspecialchars($img_src); ?>" class="object-fit-cover" alt="Announcement Image">
+                                            <img src="<?php echo htmlspecialchars($img_src); ?>" class="object-fit-cover" alt="Announcement Image" loading="lazy" decoding="async">
                                         <?php else: ?>
                                             <div class="d-flex align-items-center justify-content-center text-primary bg-primary bg-opacity-10">
                                                 <i class="bi bi-megaphone-fill fs-1"></i>

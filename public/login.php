@@ -7,13 +7,6 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// --- Migration: Add profile_picture_path to users table ---
-try {
-    $pdo->query("SELECT profile_picture_path FROM users LIMIT 1");
-} catch (PDOException $e) {
-    $pdo->exec("ALTER TABLE users ADD COLUMN profile_picture_path VARCHAR(255) NULL DEFAULT NULL");
-}
-
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }

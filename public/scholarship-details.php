@@ -43,19 +43,19 @@ if (isset($_SESSION['user_id'])) {
     }
 }
 
-try {
-    $stmt = $pdo->prepare("SELECT * FROM scholarships WHERE id = ?");
-    $stmt->execute([$scholarship_id]);
-    $scholarship = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$scholarship || ($scholarship['status'] !== 'active' && !$is_renewal_applicant)) {
-        // Scholarship not found, or inactive and user is NOT a renewal applicant
-        header("Location: scholarships.php");
-        exit();
+$scholarship = portalCacheRemember('public.scholarship:' . (int) $scholarship_id, 60, function () use ($pdo, $scholarship_id) {
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM scholarships WHERE id = ?");
+        $stmt->execute([$scholarship_id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ?: [];
+    } catch (PDOException $e) {
+        return [];
     }
-} catch (PDOException $e) {
-    // In a real app, log this error
-    header("Location: scholarships.php?error=db");
+});
+
+if (!$scholarship || ($scholarship['status'] !== 'active' && !$is_renewal_applicant)) {
+    header("Location: scholarships.php");
     exit();
 }
 
@@ -100,7 +100,9 @@ if ($is_renewal_applicant) {
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
         .details-header {
-            background: linear-gradient(135deg, rgba(0, 58, 112, 0.8), rgba(13, 110, 253, 0.9)), url('https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=2070&auto=format&fit=crop') no-repeat center center;
+            background:
+                linear-gradient(135deg, rgba(0, 58, 112, 0.84), rgba(13, 110, 253, 0.88)),
+                url('assets/images/hero-illustration.svg') no-repeat center center;
             background-size: cover;
             color: white;
             padding: 4rem 0;

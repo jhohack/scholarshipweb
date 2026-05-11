@@ -1,6 +1,7 @@
 <?php
 // Utility functions for the Scholarship Portal
 require_once __DIR__ . '/storage.php';
+require_once __DIR__ . '/cache.php';
 
 /**
  * Sanitize input data to prevent XSS and other attacks.

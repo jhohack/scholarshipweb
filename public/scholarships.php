@@ -18,48 +18,56 @@ $has_active_scholarship = false;
 // --- Filtering Logic ---
 $search = $_GET['search'] ?? '';
 $categories = isset($_GET['categories']) && is_array($_GET['categories']) ? $_GET['categories'] : [];
-$sql = "SELECT s.* FROM scholarships s";
-$whereClauses = [];
-$params = [];
 
-// Always filter for active scholarships
-$whereClauses[] = "s.status = 'active'";
+$categories_for_cache = $categories;
+sort($categories_for_cache);
+$cache_key = 'public.scholarships:' . sha1(json_encode([$search, $categories_for_cache]));
 
-// Filter out scholarships that require an exam but have no questions
-$whereClauses[] = "(s.requires_exam = 0 OR (s.requires_exam = 1 AND EXISTS (SELECT 1 FROM exam_questions eq WHERE eq.scholarship_id = s.id)))";
+$scholarships = portalCacheRemember($cache_key, 60, function () use ($pdo, $search, $categories) {
+    $sql = "SELECT
+                s.id,
+                s.name,
+                s.category,
+                s.amount,
+                s.amount_type,
+                s.deadline,
+                s.available_slots,
+                s.description
+            FROM scholarships s";
+    $whereClauses = [];
+    $params = [];
 
-if (!empty($search)) {
-    $whereClauses[] = "(s.name LIKE ? OR s.description LIKE ?)";
-    $params[] = '%' . $search . '%';
-    $params[] = '%' . $search . '%';
-}
+    $whereClauses[] = "s.status = 'active'";
+    $whereClauses[] = "(s.requires_exam = 0 OR (s.requires_exam = 1 AND EXISTS (SELECT 1 FROM exam_questions eq WHERE eq.scholarship_id = s.id)))";
 
-if (!empty($categories)) {
-    $placeholders = implode(',', array_fill(0, count($categories), '?'));
-    $whereClauses[] = "s.category IN ($placeholders)";
-}
-
-if (!empty($whereClauses)) {
-    $sql .= " WHERE " . implode(' AND ', $whereClauses);
-}
-
-$sql .= " ORDER BY s.deadline ASC";
-
-try {
-    $stmt = $pdo->prepare($sql);
-    // Merge accumulated params with categories
-    if (!empty($categories)) {
-        $params = array_merge($params, $categories);
+    if (!empty($search)) {
+        $whereClauses[] = "(s.name LIKE ? OR s.description LIKE ?)";
+        $params[] = '%' . $search . '%';
+        $params[] = '%' . $search . '%';
     }
-    $stmt->execute($params);
-    $scholarships = $stmt->fetchAll();
 
-} catch (PDOException $e) {
-    // In a real app, log this error
-    $scholarships = [];
-    $distinct_categories = [];
-    // You might want to display an error message to the user.
-}
+    if (!empty($categories)) {
+        $placeholders = implode(',', array_fill(0, count($categories), '?'));
+        $whereClauses[] = "s.category IN ($placeholders)";
+    }
+
+    if (!empty($whereClauses)) {
+        $sql .= " WHERE " . implode(' AND ', $whereClauses);
+    }
+
+    $sql .= " ORDER BY s.deadline ASC";
+
+    try {
+        $stmt = $pdo->prepare($sql);
+        if (!empty($categories)) {
+            $params = array_merge($params, $categories);
+        }
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    } catch (PDOException $e) {
+        return [];
+    }
+});
 
 $scholarship_categories = [
     'Yeomchang Scholarship',
@@ -91,8 +99,6 @@ $page_title = 'All Scholarships';
     <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <!-- Swiper.js CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/swiper/swiper-bundle.min.css" />
     <!-- Custom CSS -->
     <link rel="stylesheet" href="assets/css/style.css">
 </head>

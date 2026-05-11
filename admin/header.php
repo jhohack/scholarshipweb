@@ -39,7 +39,7 @@ function canAccess($page) {
 }
 
 $current_page_admin = basename($_SERVER['PHP_SELF']);
-$unread_messages = getUnreadMessageCount($pdo, $_SESSION['user_id'] ?? 0);
+$unread_messages = 0;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -92,8 +92,27 @@ $unread_messages = getUnreadMessageCount($pdo, $_SESSION['user_id'] ?? 0);
                     .catch(err => console.error('Notification poll error', err));
             }
 
-            // Poll every 5 seconds
-            setInterval(updateUnreadCount, 5000);
+            let unreadPollTimer = null;
+
+            function startUnreadPolling() {
+                if (unreadPollTimer) {
+                    clearInterval(unreadPollTimer);
+                }
+
+                if (document.hidden) {
+                    return;
+                }
+
+                updateUnreadCount();
+                unreadPollTimer = setInterval(() => {
+                    if (!document.hidden) {
+                        updateUnreadCount();
+                    }
+                }, 15000);
+            }
+
+            document.addEventListener('visibilitychange', startUnreadPolling);
+            startUnreadPolling();
         });
     </script>
 </head>
@@ -181,7 +200,7 @@ $unread_messages = getUnreadMessageCount($pdo, $_SESSION['user_id'] ?? 0);
                 </div>
                 <div class="user-dropdown dropdown">
                     <a href="#" class="d-flex align-items-center text-decoration-none dropdown-toggle" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                        <img src="../public/assets/images/dvclogo.png" alt="Admin" width="40" height="40" class="rounded-circle me-2">
+                        <img src="../images/brand-mark.svg" alt="Admin" width="40" height="40" class="rounded-circle me-2" loading="lazy" decoding="async">
                         <div class="d-none d-md-block">
                             <div class="user-name"><?php echo htmlspecialchars($_SESSION['name'] ?? 'Admin'); ?></div>
                             <div class="user-role"><?php echo ucfirst(htmlspecialchars($_SESSION['role'] ?? 'Admin')); ?></div>

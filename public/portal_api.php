@@ -219,7 +219,10 @@ try {
             break;
 
         case 'get_unread_count':
-            $count = getUnreadMessageCount($pdo, $user_id);
+            $cacheKey = 'unread_count:' . $user_id . ':' . ($is_admin ? 'admin' : 'student');
+            $count = portalCacheRemember($cacheKey, 5, function () use ($pdo, $user_id) {
+                return getUnreadMessageCount($pdo, $user_id);
+            });
             $response = ['success' => true, 'unread_count' => $count];
             break;
 

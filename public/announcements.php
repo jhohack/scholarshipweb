@@ -11,20 +11,49 @@ checkSessionTimeout();
 
 $page_title = 'Announcements';
 
-try {
-    $stmt = $pdo->query("SELECT * FROM announcements WHERE is_active = 1 ORDER BY created_at DESC");
-    $announcements = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    foreach ($announcements as &$ann) {
-        $stmt_att = $pdo->prepare("SELECT file_path, file_name FROM announcement_attachments WHERE announcement_id = ?");
-        $stmt_att->execute([$ann['id']]);
-        $ann['attachments'] = $stmt_att->fetchAll(PDO::FETCH_ASSOC);
+$announcements = portalCacheRemember('public.announcements.list', 60, function () use ($pdo) {
+    try {
+        $stmt = $pdo->query("SELECT id, title, content, is_active, created_at, updated_at, image_path FROM announcements WHERE is_active = 1 ORDER BY created_at DESC");
+        $announcements = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $attachmentsByAnnouncement = [];
+        $announcementIds = array_map(static function ($announcement) {
+            return (int) ($announcement['id'] ?? 0);
+        }, $announcements);
+        $announcementIds = array_values(array_filter($announcementIds));
+
+        if (!empty($announcementIds)) {
+            $placeholders = implode(',', array_fill(0, count($announcementIds), '?'));
+            $attachments_stmt = $pdo->prepare("
+                SELECT announcement_id, file_path, file_name
+                FROM announcement_attachments
+                WHERE announcement_id IN ({$placeholders})
+                ORDER BY id ASC
+            ");
+            $attachments_stmt->execute($announcementIds);
+
+            foreach ($attachments_stmt->fetchAll(PDO::FETCH_ASSOC) as $attachment) {
+                $announcementId = (int) ($attachment['announcement_id'] ?? 0);
+                if ($announcementId <= 0) {
+                    continue;
+                }
+
+                $attachmentsByAnnouncement[$announcementId][] = $attachment;
+            }
+        }
+
+        foreach ($announcements as &$ann) {
+            $annId = (int) ($ann['id'] ?? 0);
+            $ann['attachments'] = $attachmentsByAnnouncement[$annId] ?? [];
+        }
+        unset($ann);
+
+        return $announcements;
+    } catch (PDOException $e) {
+        error_log("Public announcements page error: " . $e->getMessage());
+        return [];
     }
-    unset($ann);
-} catch (PDOException $e) {
-    $announcements = [];
-    error_log("Public announcements page error: " . $e->getMessage());
-}
+});
 
 $active_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 ?>
@@ -60,7 +89,9 @@ $active_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
             content: '';
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
-            background: url('assets/images/pattern.png'); /* Optional texture */
+            background:
+                radial-gradient(circle at top left, rgba(255,255,255,0.18), transparent 28%),
+                radial-gradient(circle at bottom right, rgba(255,255,255,0.10), transparent 24%);
             opacity: 0.1;
         }
 
@@ -230,7 +261,7 @@ $active_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
                                         <div class="<?php echo count($images) === 1 ? 'col-12' : (count($images) === 2 ? 'col-md-6' : 'col-md-4'); ?>">
                                             <?php $image_url = storedFilePathToUrl($img['file_path'] ?? ''); ?>
                                             <div class="ratio ratio-16x9 gallery-img-wrapper" onclick="showImageModal('<?php echo htmlspecialchars($image_url); ?>')">
-                                                <img src="<?php echo htmlspecialchars($image_url); ?>" class="object-fit-cover" alt="Announcement Image">
+                                                <img src="<?php echo htmlspecialchars($image_url); ?>" class="object-fit-cover" alt="Announcement Image" loading="lazy" decoding="async">
                                             </div>
                                         </div>
                                     <?php endforeach; ?>

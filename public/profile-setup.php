@@ -8,14 +8,6 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// --- Migration: Add profile_picture_path to users table ---
-try {
-    $pdo->query("SELECT profile_picture_path FROM users LIMIT 1");
-} catch (PDOException $e) {
-    // If it fails, the column doesn't exist. Add it.
-    $pdo->exec("ALTER TABLE users ADD COLUMN profile_picture_path VARCHAR(255) NULL DEFAULT NULL");
-}
-
 // Security check: ensure user has verified their email and has registration data.
 if (!isset($_SESSION['is_verified_for_setup']) || !isset($_SESSION['registration_data'])) {
     header("Location: register.php");
