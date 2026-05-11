@@ -3,3 +3,7 @@
 
 .vercel
 .env*.local
+backups/
+node_modules/
+*.log
+vercel_env_summary.txt
