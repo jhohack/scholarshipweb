@@ -196,7 +196,7 @@ PHP Warning/Notice:                  // Non-critical PHP notices
 
 ### If issues persist:
 1. Check database connection pool limits
-2. Verify Neon database isn't hitting connection limits
+2. Verify the Postgres database isn't hitting connection limits
 3. Consider adding connection timeout handling to [includes/db.php](includes/db.php)
 4. Monitor file sizes - very large PDFs might need chunked uploads
 

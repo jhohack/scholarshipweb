@@ -1,0 +1,485 @@
+const fs = require('node:fs');
+const path = require('node:path');
+
+function loadPgModule() {
+  const explicitPath = process.env.PG_MODULE_PATH;
+  if (explicitPath) {
+    return require(explicitPath);
+  }
+  return require('pg');
+}
+
+function parseArgs(argv) {
+  const options = {};
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+
+    if (arg === '--help' || arg === '-h') {
+      options.help = true;
+      continue;
+    }
+
+    if (arg === '--truncate') {
+      options.truncate = true;
+      continue;
+    }
+
+    if (arg === '--backup' && argv[i + 1]) {
+      options.backup = argv[++i];
+      continue;
+    }
+
+    if (arg.startsWith('--backup=')) {
+      options.backup = arg.slice('--backup='.length);
+      continue;
+    }
+
+    if (arg === '--schema' && argv[i + 1]) {
+      options.schema = argv[++i];
+      continue;
+    }
+
+    if (arg.startsWith('--schema=')) {
+      options.schema = arg.slice('--schema='.length);
+      continue;
+    }
+
+    if (arg === '--database-url' && argv[i + 1]) {
+      options.databaseUrl = argv[++i];
+      continue;
+    }
+
+    if (arg.startsWith('--database-url=')) {
+      options.databaseUrl = arg.slice('--database-url='.length);
+      continue;
+    }
+  }
+
+  return options;
+}
+
+function envValue(key) {
+  const value = process.env[key];
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+}
+
+function firstEnvValue(keys) {
+  for (const key of keys) {
+    const value = envValue(key);
+    if (value !== null) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function buildDatabaseUrlFromEnv() {
+  const projectId = firstEnvValue(['SUPABASE_PROJECT_ID']);
+  let host = firstEnvValue(['DB_HOST', 'PGHOST', 'SUPABASE_DB_HOST', 'MYSQL_HOST']);
+  if ((!host || host === '') && projectId) {
+    host = 'aws-1-ap-southeast-1.pooler.supabase.com';
+  }
+
+  let database = firstEnvValue(['DB_NAME', 'PGDATABASE', 'SUPABASE_DB_NAME', 'MYSQL_DATABASE']);
+  if ((!database || database === '') && projectId) {
+    database = 'postgres';
+  }
+
+  let user = firstEnvValue(['DB_USER', 'PGUSER', 'SUPABASE_DB_USER', 'MYSQL_USER']);
+  if ((!user || user === '') && projectId) {
+    user = `postgres.${projectId}`;
+  }
+
+  if (!host || !database || !user) {
+    return null;
+  }
+
+  const pass = firstEnvValue(['DB_PASS', 'PGPASSWORD', 'SUPABASE_DB_PASS', 'MYSQL_PASSWORD']) || '';
+  let port = firstEnvValue(['DB_PORT', 'PGPORT', 'SUPABASE_DB_PORT', 'MYSQL_PORT']);
+  if ((!port || port === '') && projectId) {
+    port = '6543';
+  }
+
+  let sslmode = firstEnvValue(['DB_SSL_MODE', 'SUPABASE_DB_SSL_MODE']);
+  if ((!sslmode || sslmode === '') && (projectId || /\.supabase\.co$/i.test(host))) {
+    sslmode = 'require';
+  }
+
+  const query = [];
+  if (sslmode) {
+    query.push(`sslmode=${encodeURIComponent(sslmode)}`);
+  }
+
+  const channelBinding = firstEnvValue(['DB_CHANNEL_BINDING']);
+  if (channelBinding) {
+    query.push(`channel_binding=${encodeURIComponent(channelBinding)}`);
+  }
+
+  const options = firstEnvValue(['DB_PG_OPTIONS']);
+  if (options) {
+    query.push(`options=${encodeURIComponent(options)}`);
+  }
+
+  let url = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}`;
+  if (port) {
+    url += `:${port}`;
+  }
+  url += `/${encodeURIComponent(database)}`;
+
+  if (query.length > 0) {
+    url += `?${query.join('&')}`;
+  }
+
+  return url;
+}
+
+function printUsage() {
+  console.log(`Usage:
+  node tools/restore_neon_backup_json_pg.js [options]
+
+Options:
+  --backup PATH         Backup JSON file to restore
+  --schema PATH         Postgres schema file (default: sql/postgres_schema.sql)
+  --database-url URL    Postgres connection string for Supabase or another Postgres database
+  --truncate            Truncate existing rows before restoring
+  --help, -h            Show this help
+`);
+}
+
+function quoteIdentifier(name) {
+  return '"' + String(name).replace(/"/g, '""') + '"';
+}
+
+function normalizeValue(value, backupRootDir) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 1 : 0;
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return value;
+  }
+
+  if (typeof value === 'object') {
+    if (value.type === 'Buffer' && Array.isArray(value.data)) {
+      return Buffer.from(value.data);
+    }
+
+    if (value.type === 'Buffer' && typeof value.base64 === 'string') {
+      return Buffer.from(value.base64, 'base64');
+    }
+
+    if (value.type === 'Buffer' && typeof value.file === 'string') {
+      if (!backupRootDir) {
+        throw new Error('Cannot resolve a Buffer file reference without a backup directory.');
+      }
+
+      const resolvedPath = path.resolve(backupRootDir, value.file);
+      return fs.readFileSync(resolvedPath);
+    }
+
+    return JSON.stringify(value);
+  }
+
+  return value;
+}
+
+function inferBackupColumnType(columnName) {
+  if (columnName === 'id') {
+    return 'INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY';
+  }
+
+  if (columnName === 'content_blob') {
+    return 'BYTEA NOT NULL';
+  }
+
+  if (columnName === 'school_id') {
+    return 'TEXT';
+  }
+
+  const idColumns = new Set([
+    'application_id',
+    'student_id',
+    'user_id',
+    'scholarship_id',
+    'form_id',
+    'ticket_id',
+    'conversation_id',
+    'sender_id',
+    'document_id',
+    'admin_id',
+    'question_id',
+    'submission_id',
+    'announcement_id',
+  ]);
+  if (idColumns.has(columnName) || /_id$/.test(columnName)) {
+    return 'INTEGER NULL';
+  }
+
+  const timestampColumns = new Set([
+    'created_at',
+    'updated_at',
+    'submitted_at',
+    'resolved_at',
+    'email_verified_at',
+    'start_time',
+    'end_time',
+    'uploaded_at',
+  ]);
+  if (timestampColumns.has(columnName) || /_at$/.test(columnName)) {
+    return 'TIMESTAMP NULL';
+  }
+
+  const dateColumns = new Set([
+    'deadline',
+    'birthdate',
+    'date_of_birth',
+    'end_of_term',
+  ]);
+  if (dateColumns.has(columnName) || /_date$/.test(columnName)) {
+    return 'DATE NULL';
+  }
+
+  return 'TEXT';
+}
+
+function getRestoreOrder(tables) {
+  const restoreOrder = [
+    'users',
+    'students',
+    'scholarships',
+    'announcements',
+    'forms',
+    'form_fields',
+    'applications',
+    'application_exams',
+    'application_responses',
+    'documents',
+    'exam_questions',
+    'exam_submissions',
+    'exam_answers',
+    'notifications',
+    'password_resets',
+    'announcement_attachments',
+    'conversations',
+    'messages',
+    'support_tickets',
+    'support_messages',
+    'uploaded_files',
+  ];
+
+  const remaining = Object.keys(tables).filter((table) => !restoreOrder.includes(table));
+  remaining.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  return restoreOrder.concat(remaining);
+}
+
+async function tableExists(client, tableName) {
+  const result = await client.query(
+    `
+      SELECT 1
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name = $1
+      LIMIT 1
+    `,
+    [tableName]
+  );
+
+  return result.rowCount > 0;
+}
+
+async function createUploadedFilesTable(client) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS uploaded_files (
+      id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+      storage_key VARCHAR(80) NOT NULL UNIQUE,
+      folder_name VARCHAR(120),
+      original_name VARCHAR(255) NOT NULL,
+      mime_type VARCHAR(120) NOT NULL,
+      file_size INTEGER NOT NULL DEFAULT 0,
+      content_blob BYTEA NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
+
+async function createGenericBackupTable(client, tableName, columns) {
+  const definitions = columns.map((columnName) => `    ${quoteIdentifier(columnName)} ${inferBackupColumnType(columnName)}`);
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS ${quoteIdentifier(tableName)} (\n${definitions.join(',\n')}\n)`
+  );
+}
+
+async function ensureBackupTable(client, tableName, columns) {
+  if (await tableExists(client, tableName)) {
+    return;
+  }
+
+  if (tableName === 'uploaded_files') {
+    await createUploadedFilesTable(client);
+    return;
+  }
+
+  await createGenericBackupTable(client, tableName, columns);
+}
+
+async function truncateBackupTables(client, tables) {
+  const existing = [];
+  for (const tableName of tables) {
+    if (await tableExists(client, tableName)) {
+      existing.push(quoteIdentifier(tableName));
+    }
+  }
+
+  if (existing.length === 0) {
+    return;
+  }
+
+  await client.query(`TRUNCATE TABLE ${existing.join(', ')} RESTART IDENTITY CASCADE`);
+}
+
+async function setIdentitySequence(client, tableName, maxId) {
+  if (!maxId || maxId <= 0) {
+    return;
+  }
+
+  const sequenceResult = await client.query("SELECT pg_get_serial_sequence($1, 'id') AS sequence", [
+    `public.${tableName}`,
+  ]);
+  const sequence = sequenceResult.rows[0]?.sequence;
+  if (!sequence) {
+    return;
+  }
+
+  await client.query('SELECT setval($1, $2, true)', [sequence, maxId]);
+}
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+
+  if (options.help) {
+    printUsage();
+    process.exit(0);
+  }
+
+  const basePath = path.resolve(__dirname, '..');
+  const backupPath = path.resolve(options.backup || path.join(basePath, 'backups', 'neon-before-replace-20260411-003956.json'));
+  const schemaPath = path.resolve(options.schema || path.join(basePath, 'sql', 'postgres_schema.sql'));
+  const connectionString =
+    options.databaseUrl ||
+    envValue('SUPABASE_DB_URL') ||
+    envValue('SUPABASE_DATABASE_URL') ||
+    envValue('DATABASE_URL') ||
+    envValue('POSTGRES_URL') ||
+    envValue('DB_URL') ||
+    buildDatabaseUrlFromEnv();
+
+  if (!connectionString) {
+    throw new Error('SUPABASE_DB_URL, SUPABASE_DATABASE_URL, DATABASE_URL, POSTGRES_URL, or DB_URL is required.');
+  }
+
+  if (!fs.existsSync(backupPath)) {
+    throw new Error(`Backup file not found: ${backupPath}`);
+  }
+
+  if (!fs.existsSync(schemaPath)) {
+    throw new Error(`Schema file not found: ${schemaPath}`);
+  }
+
+  const backupRootDir = path.dirname(backupPath);
+  const backup = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
+  const tables = backup.tables;
+
+  if (!tables || typeof tables !== 'object') {
+    throw new Error('The backup file does not contain a tables object.');
+  }
+
+  const { Client } = loadPgModule();
+  const client = new Client({
+    connectionString,
+    ssl: { rejectUnauthorized: false },
+  });
+
+  await client.connect();
+  console.log(`Connected to ${connectionString.replace(/:[^:@/]*@/, ':***@')}`);
+
+  try {
+    await client.query('BEGIN');
+    await client.query('SET search_path TO public');
+    await client.query('SET CONSTRAINTS ALL DEFERRED');
+    await client.query(fs.readFileSync(schemaPath, 'utf8'));
+
+    const tableOrder = getRestoreOrder(tables);
+
+    if (options.truncate) {
+      await truncateBackupTables(client, tableOrder);
+      console.log('Existing rows cleared.');
+    }
+
+    const maxIds = new Map();
+
+    for (const tableName of tableOrder) {
+      const tableInfo = tables[tableName];
+      if (!tableInfo) {
+        continue;
+      }
+
+      const columns = Array.isArray(tableInfo.columns) ? tableInfo.columns : [];
+      if (columns.length === 0) {
+        console.log(`Skipping ${tableName} (no columns).`);
+        continue;
+      }
+
+      await ensureBackupTable(client, tableName, columns);
+
+      const quotedColumns = columns.map(quoteIdentifier);
+      const placeholders = columns.map((_, index) => '$' + (index + 1));
+      const insertSql = `INSERT INTO ${quoteIdentifier(tableName)} (${quotedColumns.join(', ')}) VALUES (${placeholders.join(', ')})`;
+      let restoredCount = 0;
+
+      for (const row of tableInfo.rows || []) {
+        if (!row || typeof row !== 'object') {
+          continue;
+        }
+
+        const values = columns.map((columnName) => normalizeValue(row[columnName] ?? null, backupRootDir));
+        await client.query(insertSql, values);
+        restoredCount++;
+
+        if (Object.prototype.hasOwnProperty.call(row, 'id') && Number.isFinite(Number(row.id))) {
+          const current = maxIds.get(tableName) || 0;
+          maxIds.set(tableName, Math.max(current, Number(row.id)));
+        }
+      }
+
+      console.log(`Restored ${tableName}: ${restoredCount} row(s).`);
+    }
+
+    for (const [tableName, maxId] of maxIds.entries()) {
+      await setIdentitySequence(client, tableName, maxId);
+    }
+
+    await client.query('COMMIT');
+    console.log('Restore complete.');
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('Rollback failed:', rollbackError.message || rollbackError);
+    }
+
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+main().catch((error) => {
+  console.error(error.message || error);
+  process.exit(1);
+});

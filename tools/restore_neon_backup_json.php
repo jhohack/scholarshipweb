@@ -21,10 +21,16 @@ if (isset($options['help'])) {
 
 $backupPath = $options['backup'] ?? $defaultBackupPath;
 $schemaPath = $options['schema'] ?? $defaultSchemaPath;
-$databaseUrl = $options['database-url'] ?? envValue('DATABASE_URL') ?? envValue('POSTGRES_URL') ?? envValue('DB_URL');
+$databaseUrl = $options['database-url']
+    ?? envValue('SUPABASE_DB_URL')
+    ?? envValue('SUPABASE_DATABASE_URL')
+    ?? envValue('DATABASE_URL')
+    ?? envValue('POSTGRES_URL')
+    ?? envValue('DB_URL')
+    ?? buildDatabaseUrlFromEnv();
 
 if ($databaseUrl === null || $databaseUrl === '') {
-    fwrite(STDERR, "DATABASE_URL, POSTGRES_URL, or DB_URL is required.\n");
+    fwrite(STDERR, "SUPABASE_DB_URL, SUPABASE_DATABASE_URL, DATABASE_URL, POSTGRES_URL, or DB_URL is required.\n");
     exit(1);
 }
 
@@ -37,6 +43,8 @@ if (!is_file($schemaPath)) {
     fwrite(STDERR, "Schema file not found: {$schemaPath}\n");
     exit(1);
 }
+
+$backupRootDir = dirname(realpath($backupPath) ?: $backupPath);
 
 [$pdo, $connectionInfo] = connectPostgres($databaseUrl);
 echo 'Connected to ' . $connectionInfo['host'] . ':' . $connectionInfo['port'] . '/' . $connectionInfo['database'] . PHP_EOL;
@@ -130,7 +138,7 @@ foreach ($tableOrder as $tableName) {
 
         $params = [];
         foreach ($columns as $columnName) {
-            $params[] = normalizeBackupValue($row[$columnName] ?? null);
+            $params[] = normalizeBackupValue($row[$columnName] ?? null, $backupRootDir);
         }
 
         $stmt->execute($params);
@@ -231,6 +239,81 @@ function envValue(string $key): ?string
 
     $value = trim((string) $value);
     return $value === '' ? null : $value;
+}
+
+function firstEnvValue(array $keys): ?string
+{
+    foreach ($keys as $key) {
+        $value = envValue((string) $key);
+        if ($value !== null) {
+            return $value;
+        }
+    }
+
+    return null;
+}
+
+function buildDatabaseUrlFromEnv(): ?string
+{
+    $projectId = firstEnvValue(['SUPABASE_PROJECT_ID']);
+    $host = firstEnvValue(['DB_HOST', 'PGHOST', 'SUPABASE_DB_HOST', 'MYSQL_HOST']);
+    if (($host === null || $host === '') && $projectId !== null && $projectId !== '') {
+        $host = 'aws-1-ap-southeast-1.pooler.supabase.com';
+    }
+
+    $database = firstEnvValue(['DB_NAME', 'PGDATABASE', 'SUPABASE_DB_NAME', 'MYSQL_DATABASE']);
+    if (($database === null || $database === '') && $projectId !== null && $projectId !== '') {
+        $database = 'postgres';
+    }
+
+    $user = firstEnvValue(['DB_USER', 'PGUSER', 'SUPABASE_DB_USER', 'MYSQL_USER']);
+    if (($user === null || $user === '') && $projectId !== null && $projectId !== '') {
+        $user = 'postgres.' . $projectId;
+    }
+
+    if ($host === null || $database === null || $user === null) {
+        return null;
+    }
+
+    $pass = firstEnvValue(['DB_PASS', 'PGPASSWORD', 'SUPABASE_DB_PASS', 'MYSQL_PASSWORD']) ?? '';
+    $port = firstEnvValue(['DB_PORT', 'PGPORT', 'SUPABASE_DB_PORT', 'MYSQL_PORT']);
+    if (($port === null || $port === '') && $projectId !== null && $projectId !== '') {
+        $port = '6543';
+    }
+
+    $sslmode = firstEnvValue(['DB_SSL_MODE', 'SUPABASE_DB_SSL_MODE']);
+    if (($sslmode === null || $sslmode === '') && (
+        ($projectId !== null && $projectId !== '') || preg_match('/\.supabase\.co$/i', $host)
+    )) {
+        $sslmode = 'require';
+    }
+
+    $query = [];
+    if ($sslmode !== null && $sslmode !== '') {
+        $query[] = 'sslmode=' . rawurlencode($sslmode);
+    }
+
+    $channelBinding = firstEnvValue(['DB_CHANNEL_BINDING']);
+    if ($channelBinding !== null && $channelBinding !== '') {
+        $query[] = 'channel_binding=' . rawurlencode($channelBinding);
+    }
+
+    $options = firstEnvValue(['DB_PG_OPTIONS']);
+    if ($options !== null && $options !== '') {
+        $query[] = 'options=' . rawurlencode($options);
+    }
+
+    $dsn = 'postgresql://' . rawurlencode($user) . ':' . rawurlencode($pass) . '@' . $host;
+    if ($port !== null && $port !== '') {
+        $dsn .= ':' . (int) $port;
+    }
+    $dsn .= '/' . rawurlencode($database);
+
+    if ($query !== []) {
+        $dsn .= '?' . implode('&', $query);
+    }
+
+    return $dsn;
 }
 
 function connectPostgres(string $databaseUrl): array
@@ -468,6 +551,10 @@ function inferBackupColumnType(string $columnName): string
         return 'BYTEA NOT NULL';
     }
 
+    if ($columnName === 'school_id') {
+        return 'TEXT';
+    }
+
     if (in_array($columnName, ['application_id', 'student_id', 'user_id', 'scholarship_id', 'form_id', 'ticket_id', 'conversation_id', 'sender_id', 'document_id', 'admin_id', 'question_id', 'submission_id', 'announcement_id'], true) || preg_match('/_id$/', $columnName)) {
         return 'INTEGER NULL';
     }
@@ -503,7 +590,7 @@ function prepareInsertStatement(PDO $pdo, string $tableName, array $columns): PD
     return $pdo->prepare($sql);
 }
 
-function normalizeBackupValue($value)
+function normalizeBackupValue($value, ?string $backupRootDir = null)
 {
     if ($value === null) {
         return null;
@@ -514,6 +601,29 @@ function normalizeBackupValue($value)
     }
 
     if (is_array($value)) {
+        if (($value['type'] ?? null) === 'Buffer' && isset($value['file']) && is_string($value['file'])) {
+            if ($backupRootDir === null || $backupRootDir === '') {
+                throw new RuntimeException('Cannot resolve exported file reference without a backup directory.');
+            }
+
+            $resolvedPath = rtrim($backupRootDir, '/\\') . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $value['file']);
+            $binary = @file_get_contents($resolvedPath);
+            if ($binary === false) {
+                throw new RuntimeException('Failed to read exported file: ' . $resolvedPath);
+            }
+
+            return bin2hex($binary);
+        }
+
+        if (($value['type'] ?? null) === 'Buffer' && isset($value['base64']) && is_string($value['base64'])) {
+            $binary = base64_decode($value['base64'], true);
+            if ($binary === false) {
+                throw new RuntimeException('Failed to decode base64 buffer data.');
+            }
+
+            return bin2hex($binary);
+        }
+
         if (($value['type'] ?? null) === 'Buffer' && isset($value['data']) && is_array($value['data'])) {
             $binary = '';
             foreach ($value['data'] as $byte) {

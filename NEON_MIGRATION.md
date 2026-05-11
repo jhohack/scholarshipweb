@@ -1,6 +1,6 @@
-# Neon Migration
+# Supabase Migration
 
-This project now includes a PostgreSQL schema and a converted data import for Neon.
+This project now includes a PostgreSQL schema and a data import path that works with Supabase Postgres.
 
 ## Files
 
@@ -8,15 +8,15 @@ This project now includes a PostgreSQL schema and a converted data import for Ne
   - Creates the PostgreSQL tables used by the current app.
 - `sql/postgres_data_from_mysql.sql`
   - Generated from `scholarship_db (2).sql`
-  - Imports the existing MySQL data into PostgreSQL/Neon.
+  - Imports the existing MySQL data into PostgreSQL.
 - `tools/convert_mysql_dump_to_postgres_sql.php`
   - Regenerates the PostgreSQL data file from a MySQL dump.
 - `tools/migrate_uploads_to_database.php`
   - Moves legacy files from `public/uploads` into the DB-backed `uploaded_files` table.
 
-## 1. Create Neon
+## 1. Create Supabase
 
-Create a Neon Postgres database and copy its connection string.
+Create a Supabase project and note the database connection details from the dashboard.
 
 ## 2. Import the Schema
 
@@ -24,7 +24,7 @@ Run the contents of:
 
 - `sql/postgres_schema.sql`
 
-You can paste it into the Neon SQL editor or run it with any Postgres client.
+You can paste it into the Supabase SQL editor or run it with any Postgres client.
 
 ## 3. Import the Existing MySQL Data
 
@@ -44,24 +44,31 @@ Or specify custom paths:
 C:\xampp\php\php.exe tools\convert_mysql_dump_to_postgres_sql.php "path\to\dump.sql" "sql\postgres_data_from_mysql.sql"
 ```
 
-## 4. Point the App to Neon
+## 4. Point the App to Supabase
 
-Set these environment variables in Vercel:
+Set these environment variables in Vercel or your local `.env.local`:
 
 ```env
 DB_DRIVER=pgsql
-DATABASE_URL=postgresql://...
+SUPABASE_PROJECT_ID=dahqlxsjsduyvksbwxqq
+SUPABASE_URL=https://dahqlxsjsduyvksbwxqq.supabase.co
+DB_HOST=aws-1-ap-southeast-1.pooler.supabase.com
+DB_PORT=6543
+DB_NAME=postgres
+DB_USER=postgres.dahqlxsjsduyvksbwxqq
+DB_PASS=your-supabase-db-password
+DB_SSL_MODE=require
 UPLOAD_DRIVER=database
 ```
 
-You can also use the split variables instead of `DATABASE_URL`:
+You can also use the split variables instead of `DATABASE_URL` if you prefer:
 
 ```env
 DB_DRIVER=pgsql
-DB_HOST=...
-DB_PORT=5432
+DB_HOST=aws-1-ap-southeast-1.pooler.supabase.com
+DB_PORT=6543
 DB_NAME=...
-DB_USER=...
+DB_USER=postgres.dahqlxsjsduyvksbwxqq
 DB_PASS=...
 DB_SSL_MODE=require
 UPLOAD_DRIVER=database
@@ -69,7 +76,7 @@ UPLOAD_DRIVER=database
 
 ## 5. Migrate Existing Uploaded Files
 
-After the records are imported into Neon, move legacy files from local disk into the `uploaded_files` table.
+After the records are imported into Supabase, move legacy files from local disk into the `uploaded_files` table.
 
 Dry run first:
 
@@ -86,15 +93,15 @@ C:\xampp\php\php.exe tools\migrate_uploads_to_database.php
 Important:
 
 - Run this from a machine that still has the old `public/uploads` files.
-- Make sure the DB env vars point to Neon before running it.
+- Make sure the DB env vars point to Supabase before running it.
 
 ## 6. Deploy
 
-Redeploy on Vercel after the Neon env vars are saved.
+Redeploy on Vercel after the Supabase env vars are saved.
 
 ## 7. Restore the Old Snapshot
 
-If the old Neon project is paused or you cannot reach it because of the transfer limit, you can restore the saved snapshot in this repo into a PostgreSQL database.
+If the source database is unavailable, you can restore the saved snapshot in this repo into any PostgreSQL database, including Supabase.
 
 The backup lives at:
 
@@ -120,7 +127,7 @@ Important:
 
 ## 8. Local MySQL Recovery
 
-If Neon is still blocked, you can restore the same snapshot into the local XAMPP MariaDB server and run the app from that copy.
+If you need a local fallback, you can restore the same snapshot into the local XAMPP MariaDB server and run the app from that copy.
 
 The local restore script is:
 

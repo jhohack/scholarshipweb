@@ -33,6 +33,8 @@ if (!is_file($backupPath)) {
     exit(1);
 }
 
+$backupRootDir = dirname(realpath($backupPath) ?: $backupPath);
+
 $backup = json_decode(file_get_contents($backupPath), true, 512, JSON_THROW_ON_ERROR);
 $tables = $backup['tables'] ?? null;
 if (!is_array($tables)) {
@@ -137,7 +139,7 @@ foreach ($tableOrder as $tableName) {
 
         $params = [];
         foreach ($columns as $columnName) {
-            $params[] = normalizeBackupValue($row[$columnName] ?? null);
+            $params[] = normalizeBackupValue($row[$columnName] ?? null, $backupRootDir);
 
             if ($columnName === 'id' && isset($row[$columnName]) && is_numeric($row[$columnName])) {
                 $autoIncrementMaximums[$tableName] = max($autoIncrementMaximums[$tableName] ?? 0, (int) $row[$columnName]);
@@ -449,6 +451,10 @@ function inferBackupColumnType(string $columnName): string
         return 'LONGBLOB NOT NULL';
     }
 
+    if ($columnName === 'school_id') {
+        return 'TEXT';
+    }
+
     if (in_array($columnName, ['application_id', 'student_id', 'user_id', 'scholarship_id', 'form_id', 'ticket_id', 'conversation_id', 'sender_id', 'document_id', 'admin_id', 'question_id', 'submission_id', 'announcement_id'], true) || preg_match('/_id$/', $columnName)) {
         return 'INT NULL';
     }
@@ -484,7 +490,7 @@ function prepareInsertStatement(PDO $pdo, string $tableName, array $columns): PD
     return $pdo->prepare($sql);
 }
 
-function normalizeBackupValue($value)
+function normalizeBackupValue($value, ?string $backupRootDir = null)
 {
     if ($value === null) {
         return null;
@@ -495,6 +501,29 @@ function normalizeBackupValue($value)
     }
 
     if (is_array($value)) {
+        if (($value['type'] ?? null) === 'Buffer' && isset($value['file']) && is_string($value['file'])) {
+            if ($backupRootDir === null || $backupRootDir === '') {
+                throw new RuntimeException('Cannot resolve exported file reference without a backup directory.');
+            }
+
+            $resolvedPath = rtrim($backupRootDir, '/\\') . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $value['file']);
+            $binary = @file_get_contents($resolvedPath);
+            if ($binary === false) {
+                throw new RuntimeException('Failed to read exported file: ' . $resolvedPath);
+            }
+
+            return bin2hex($binary);
+        }
+
+        if (($value['type'] ?? null) === 'Buffer' && isset($value['base64']) && is_string($value['base64'])) {
+            $binary = base64_decode($value['base64'], true);
+            if ($binary === false) {
+                throw new RuntimeException('Failed to decode base64 buffer data.');
+            }
+
+            return bin2hex($binary);
+        }
+
         if (($value['type'] ?? null) === 'Buffer' && isset($value['data']) && is_array($value['data'])) {
             $binary = '';
             foreach ($value['data'] as $byte) {
