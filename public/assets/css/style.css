@@ -344,7 +344,7 @@ body {
     min-height: 90vh;
     background:
         linear-gradient(rgba(10, 25, 47, 0.80), rgba(10, 25, 47, 0.80)),
-        url('../images/hero-illustration.svg') no-repeat center center;
+        url('../images/hero-bg.jpg') no-repeat center center;
     background-size: cover;
     position: relative;
     overflow: hidden;
