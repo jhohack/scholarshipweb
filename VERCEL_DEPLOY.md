@@ -29,8 +29,10 @@ DB_PASS=your_database_password
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_SECURE=tls
-SMTP_USER=your-email@example.com
+SMTP_USER=dvcscholarship@dvci-edu.com
 SMTP_PASS=your-app-password
+SMTP_FROM_EMAIL=dvcscholarship@dvci-edu.com
+SMTP_FROM_NAME=DVC Scholarship Hub
 
 GOOGLE_CLIENT_ID=your-google-client-id
 

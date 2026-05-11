@@ -235,12 +235,13 @@ define('BASE_URL', rtrim(env_config('BASE_URL', $legacyBaseUrl), '/'));
 
 define('GOOGLE_CLIENT_ID', env_config('GOOGLE_CLIENT_ID', '127649949023-se8oo6060ho0amkk852h2lk0atms23vj.apps.googleusercontent.com'));
 
+// Enforce the shared project mailbox for every outbound email.
+define('SMTP_USER', 'dvcscholarship@dvci-edu.com');
 define('SMTP_HOST', env_config('SMTP_HOST', 'smtp.gmail.com'));
-define('SMTP_USER', env_config('SMTP_USER', ''));
 define('SMTP_PASS', env_config('SMTP_PASS', ''));
 define('SMTP_PORT', (int) env_config('SMTP_PORT', 587));
 define('SMTP_SECURE', env_config('SMTP_SECURE', 'tls'));
-define('SMTP_FROM_EMAIL', env_config('SMTP_FROM_EMAIL', env_config('MAIL_FROM_ADDRESS', SMTP_USER)));
+define('SMTP_FROM_EMAIL', 'dvcscholarship@dvci-edu.com');
 define('SMTP_FROM_NAME', env_config('SMTP_FROM_NAME', env_config('MAIL_FROM_NAME', 'DVC Scholarship Hub')));
 
 define('UPLOAD_DRIVER', env_config('UPLOAD_DRIVER', IS_VERCEL ? 'database' : 'local'));
