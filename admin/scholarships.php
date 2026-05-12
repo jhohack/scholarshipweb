@@ -1355,88 +1355,99 @@ switch ($action) {
                         return;
                     }
 
-                    const scholarshipId = trigger.getAttribute('data-scholarship-id') || '';
-                    const scholarshipName = trigger.getAttribute('data-scholarship-name') || 'Scholarship';
-                    const approvedCount = parseInt(trigger.getAttribute('data-approved-count') || '0', 10);
-                    const occupiedCount = parseInt(trigger.getAttribute('data-occupied-count') || '0', 10);
-                    const availableSlots = parseInt(trigger.getAttribute('data-available-slots') || '0', 10);
-                    const remainingSlots = parseInt(trigger.getAttribute('data-remaining-slots') || '0', 10);
-                    const deadline = trigger.getAttribute('data-deadline') || '';
-                    const status = trigger.getAttribute('data-status') || 'active';
-                    const acceptingNew = trigger.getAttribute('data-accepting-new') === '1';
-                    const isFull = trigger.getAttribute('data-is-full') === '1' || availableSlots === 0 || occupiedCount >= availableSlots;
-                    const cloneUrl = trigger.getAttribute('data-clone-url') || '#';
-                    const deadlineOpen = !deadline || new Date(deadline + 'T00:00:00').getTime() >= Date.now();
+                    try {
+                        const scholarshipId = trigger.getAttribute('data-scholarship-id') || '';
+                        const scholarshipName = trigger.getAttribute('data-scholarship-name') || 'Scholarship';
+                        const approvedCount = parseInt(trigger.getAttribute('data-approved-count') || '0', 10);
+                        const occupiedCount = parseInt(trigger.getAttribute('data-occupied-count') || '0', 10);
+                        const availableSlots = parseInt(trigger.getAttribute('data-available-slots') || '0', 10);
+                        const remainingSlots = parseInt(trigger.getAttribute('data-remaining-slots') || '0', 10);
+                        const deadline = trigger.getAttribute('data-deadline') || '';
+                        const status = trigger.getAttribute('data-status') || 'active';
+                        const acceptingNew = trigger.getAttribute('data-accepting-new') === '1';
+                        const isFull = trigger.getAttribute('data-is-full') === '1' || availableSlots === 0 || occupiedCount >= availableSlots;
+                        const cloneUrl = trigger.getAttribute('data-clone-url') || '#';
+                        const deadlineOpen = !deadline || new Date(deadline + 'T00:00:00').getTime() >= Date.now();
 
-                    let stateLabel = 'Open';
-                    let stateClass = 'bg-success';
-                    if (status === 'archived') {
-                        stateLabel = 'Archived';
-                        stateClass = 'bg-dark';
-                    } else if (status === 'inactive') {
-                        stateLabel = 'Draft';
-                        stateClass = 'bg-warning text-dark';
-                    } else if (!deadlineOpen) {
-                        stateLabel = 'Closed';
-                        stateClass = 'bg-secondary';
-                    } else if (isFull) {
-                        stateLabel = 'Full';
-                        stateClass = 'bg-danger';
-                    } else if (!acceptingNew) {
-                        stateLabel = 'Closed';
-                        stateClass = 'bg-secondary';
-                    }
+                        let stateLabel = 'Open';
+                        let stateClass = 'bg-success';
+                        if (status === 'archived') {
+                            stateLabel = 'Archived';
+                            stateClass = 'bg-dark';
+                        } else if (status === 'inactive') {
+                            stateLabel = 'Draft';
+                            stateClass = 'bg-warning text-dark';
+                        } else if (!deadlineOpen) {
+                            stateLabel = 'Closed';
+                            stateClass = 'bg-secondary';
+                        } else if (isFull) {
+                            stateLabel = 'Full';
+                            stateClass = 'bg-danger';
+                        } else if (!acceptingNew) {
+                            stateLabel = 'Closed';
+                            stateClass = 'bg-secondary';
+                        }
 
-                    document.getElementById('manageSlotsScholarshipName').textContent = scholarshipName;
-                    document.getElementById('manageSlotsApprovedCount').textContent = approvedCount.toString();
-                    document.getElementById('manageSlotsOccupiedCount').textContent = occupiedCount.toString();
-                    document.getElementById('manageSlotsAvailableSlots').textContent = availableSlots.toString();
-                    document.getElementById('manageSlotsRemainingSlots').textContent = remainingSlots.toString();
+                        document.getElementById('manageSlotsScholarshipName').textContent = scholarshipName;
+                        document.getElementById('manageSlotsApprovedCount').textContent = approvedCount.toString();
+                        document.getElementById('manageSlotsOccupiedCount').textContent = occupiedCount.toString();
+                        document.getElementById('manageSlotsAvailableSlots').textContent = availableSlots.toString();
+                        document.getElementById('manageSlotsRemainingSlots').textContent = remainingSlots.toString();
 
-                    const stateBadge = document.getElementById('manageSlotsStateBadge');
-                    stateBadge.className = 'badge ' + stateClass;
-                    stateBadge.textContent = stateLabel;
+                        const stateBadge = document.getElementById('manageSlotsStateBadge');
+                        stateBadge.className = 'badge ' + stateClass;
+                        stateBadge.textContent = stateLabel;
 
-                    const approvedBadge = document.getElementById('manageSlotsApprovedCountBadge');
-                    approvedBadge.textContent = approvedCount.toString() + ' Approved';
+                        const approvedBadge = document.getElementById('manageSlotsApprovedCountBadge');
+                        approvedBadge.textContent = approvedCount.toString() + ' Approved';
 
-                    const addSlotsButton = document.getElementById('manageSlotsAddButton');
-                    const additionalInput = document.getElementById('manageSlotsAdditional');
-                    if (addSlotsButton && additionalInput) {
-                        // Always allow adding slots to reopen a scholarship, even if deadline has passed
-                        addSlotsButton.disabled = status === 'archived';
-                        additionalInput.disabled = status === 'archived';
-                    }
+                        const addSlotsButton = document.getElementById('manageSlotsAddButton');
+                        const additionalInput = document.getElementById('manageSlotsAdditional');
+                        if (addSlotsButton && additionalInput) {
+                            // Always allow adding slots to reopen a scholarship, even if deadline has passed
+                            addSlotsButton.disabled = status === 'archived';
+                            additionalInput.disabled = status === 'archived';
+                        }
 
-                    document.getElementById('manageSlotsScholarshipId').value = scholarshipId;
-                    document.getElementById('manageSlotsCloneLink').setAttribute('href', cloneUrl);
+                        document.getElementById('manageSlotsScholarshipId').value = scholarshipId;
+                        document.getElementById('manageSlotsCloneLink').setAttribute('href', cloneUrl);
 
-                    const students = JSON.parse(trigger.getAttribute('data-approved-students') || '[]');
-                    const studentsContainer = document.getElementById('manageSlotsStudents');
+                        const approvedStudentsJson = trigger.getAttribute('data-approved-students') || '[]';
+                        let students = [];
+                        try {
+                            students = JSON.parse(approvedStudentsJson);
+                        } catch (e) {
+                            console.warn('Failed to parse approved students JSON:', e);
+                            students = [];
+                        }
+                        
+                        const studentsContainer = document.getElementById('manageSlotsStudents');
 
-                    if (!Array.isArray(students) || students.length === 0) {
-                        studentsContainer.innerHTML = '<div class="list-group-item text-muted">No approved scholars yet.</div>';
-                        return;
-                    }
+                        if (!Array.isArray(students) || students.length === 0) {
+                            studentsContainer.innerHTML = '<div class="list-group-item text-muted">No approved scholars yet.</div>';
+                        } else {
+                            studentsContainer.innerHTML = students.map(function(student) {
+                                const name = student.student_name || 'Student';
+                                const schoolId = student.school_id_number || '';
+                                const displayStatus = student.display_status || student.status || 'Approved';
+                                const statusClass = displayStatus === 'For Renewal' ? 'bg-warning text-dark' : 'bg-success';
 
-                    studentsContainer.innerHTML = students.map(function(student) {
-                        const name = student.student_name || 'Student';
-                        const schoolId = student.school_id_number || '';
-                        const displayStatus = student.display_status || student.status || 'Approved';
-                        const statusClass = displayStatus === 'For Renewal' ? 'bg-warning text-dark' : 'bg-success';
-
-                        return `
-                            <div class="list-group-item">
-                                <div class="d-flex justify-content-between align-items-start gap-3">
-                                    <div>
-                                        <div class="fw-bold">${escapeHtml(name)}</div>
-                                        <div class="text-muted small">${escapeHtml(schoolId)}</div>
+                                return `
+                                    <div class="list-group-item">
+                                        <div class="d-flex justify-content-between align-items-start gap-3">
+                                            <div>
+                                                <div class="fw-bold">${escapeHtml(name)}</div>
+                                                <div class="text-muted small">${escapeHtml(schoolId)}</div>
+                                            </div>
+                                            <span class="badge ${statusClass}">${escapeHtml(displayStatus)}</span>
+                                        </div>
                                     </div>
-                                    <span class="badge ${statusClass}">${escapeHtml(displayStatus)}</span>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
+                                `;
+                            }).join('');
+                        }
+                    } catch (err) {
+                        console.error('Error in manageSlotsModal event handler:', err);
+                    }
                 });
             }
         </script>
