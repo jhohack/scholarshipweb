@@ -1403,8 +1403,9 @@ switch ($action) {
                     const addSlotsButton = document.getElementById('manageSlotsAddButton');
                     const additionalInput = document.getElementById('manageSlotsAdditional');
                     if (addSlotsButton && additionalInput) {
-                        addSlotsButton.disabled = !deadlineOpen;
-                        additionalInput.disabled = !deadlineOpen;
+                        // Always allow adding slots to reopen a scholarship, even if deadline has passed
+                        addSlotsButton.disabled = status === 'archived';
+                        additionalInput.disabled = status === 'archived';
                     }
 
                     document.getElementById('manageSlotsScholarshipId').value = scholarshipId;
