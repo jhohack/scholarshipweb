@@ -141,7 +141,7 @@ try {
                     WHERE sub.student_id = a.student_id
                     AND sub.scholarship_id = a.scholarship_id
                 )
-                AND a.status IN ('Active', 'Approved', 'For Renewal', 'Renewal Request', 'Drop Requested')
+                AND a.status IN ('Active', 'Approved', 'Accepted', 'For Renewal', 'Renewal Request', 'Drop Requested')
                 LIMIT 1
             ");
             $stmt->execute([$student_id_check, $scholarship_id]);
@@ -160,7 +160,7 @@ try {
                     AND sub.scholarship_id = a.scholarship_id
                 )
                 AND (
-                    a.status IN ('Active', 'Approved', 'For Renewal')
+                    a.status IN ('Active', 'Approved', 'Accepted', 'For Renewal')
                     OR (a.status = 'Rejected' AND a.applicant_type = 'Renewal')
                 )
             ");
@@ -169,7 +169,7 @@ try {
 
             // Only bother checking the duplicate application status when the user is actually allowed to proceed.
             if (!$state['conflicting_scholarship_exists'] || $state['can_renew']) {
-                $stmt = $pdo->prepare("SELECT status FROM applications WHERE student_id = ? AND scholarship_id = ? AND status IN ('Pending', 'Under Review', 'Pending Exam', 'Renewal Request', 'Drop Requested') LIMIT 1");
+            $stmt = $pdo->prepare("SELECT status FROM applications WHERE student_id = ? AND scholarship_id = ? AND status IN ('Pending', 'Under Review', 'Pending Exam', 'Renewal Request', 'Drop Requested') LIMIT 1");
                 $stmt->execute([$student_id_check, $scholarship_id]);
                 $state['existing_status'] = $stmt->fetchColumn() ?: null;
             }
@@ -289,11 +289,11 @@ try {
     }
 
     // --- Check Slot Availability ---
-    // Count currently active scholars to see if slots are full
-    $slot_check_stmt = $pdo->prepare("SELECT COUNT(*) FROM applications WHERE scholarship_id = ? AND status = 'Active'");
-    $slot_check_stmt->execute([$scholarship_id]);
-    $current_active_scholars = $slot_check_stmt->fetchColumn();
-    $slots_full = ($current_active_scholars >= $scholarship['available_slots']);
+    $capacity = getScholarshipCapacitySummary($pdo, (int) $scholarship_id, (int) ($scholarship['available_slots'] ?? 0));
+    $current_approved_scholars = (int) ($capacity['approved_count'] ?? 0);
+    $current_occupied_scholars = (int) ($capacity['occupied_count'] ?? 0);
+    $remaining_slots = (int) ($capacity['remaining_slots'] ?? 0);
+    $slots_full = !empty($capacity['is_full']);
 
     $deadline = !empty($scholarship['deadline']) ? new DateTime($scholarship['deadline']) : null;
     $now = new DateTime();
@@ -315,6 +315,19 @@ try {
     }
 
     if (!$can_renew) {
+        if ($slots_full) {
+            renderApplicationNoticePage(
+                $base_path,
+                'Scholarship Full',
+                'bi-person-lock',
+                'text-danger',
+                'This scholarship has reached its slot limit.',
+                'Please return later to see if new slots are opened or choose another available scholarship.',
+                'scholarships.php',
+                'Back to Scholarships'
+            );
+        }
+
         if (!$accepting_new_applicants) {
             renderApplicationNoticePage(
                 $base_path,
@@ -577,7 +590,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             AND a.scholarship_id = ? 
             AND a.id = (SELECT MAX(sub.id) FROM applications sub WHERE sub.student_id = a.student_id AND sub.scholarship_id = a.scholarship_id) 
             AND (
-                a.status IN ('Active', 'Approved', 'For Renewal')
+                a.status IN ('Active', 'Approved', 'Accepted', 'For Renewal')
                 OR (a.status = 'Rejected' AND a.applicant_type = 'Renewal')
             )
         ");
@@ -585,6 +598,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $is_renewing = ($renew_stmt->fetchColumn() > 0);
         $is_incoming_student = !$is_renewing && $selected_student_status === 'Incoming Student';
         $is_continuing_student = !$is_renewing && $selected_student_status === 'Continuing Student';
+        $fresh_capacity = getScholarshipCapacitySummary($pdo, (int) $scholarship_id, (int) ($scholarship['available_slots'] ?? 0));
+        $slots_full = !empty($fresh_capacity['is_full']);
+        $current_approved_scholars = (int) ($fresh_capacity['approved_count'] ?? $current_approved_scholars);
+        $current_occupied_scholars = (int) ($fresh_capacity['occupied_count'] ?? $current_occupied_scholars);
+        $remaining_slots = (int) ($fresh_capacity['remaining_slots'] ?? $remaining_slots);
         // --- Validation: Renewal vs New Logic ---
         // If applying as Renewal, ensure they actually have an active scholarship for this ID.
         // If applying as New, check if slots are full
@@ -598,7 +616,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $errors[] = "The deadline for new applicants has already passed.";
         }
         if (!$is_renewing && $slots_full) {
-            $errors[] = "This scholarship has reached its limit for new applicants (Slots Full). Only renewal applications are currently accepted.";
+            $errors[] = "This scholarship has reached its slot limit and is currently full.";
         }
 
         // Validation for Renewal Applicants

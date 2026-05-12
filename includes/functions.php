@@ -111,6 +111,93 @@ if (!function_exists('getCurrentStudentId')) {
     }
 }
 
+if (!function_exists('getScholarshipCapacitySummary')) {
+    /**
+     * Returns the current scholar counts for a scholarship based on the latest
+     * application per student.
+     *
+     * @param PDO $pdo
+     * @param int $scholarship_id
+     * @param int|null $available_slots Optional slot limit for derived state.
+     * @return array<string, mixed>
+     */
+    function getScholarshipCapacitySummary(PDO $pdo, int $scholarship_id, ?int $available_slots = null): array
+    {
+        if ($scholarship_id <= 0) {
+            $available_slots = max(0, (int) ($available_slots ?? 0));
+
+            return [
+                'available_slots' => $available_slots,
+                'approved_count' => 0,
+                'occupied_count' => 0,
+                'remaining_slots' => $available_slots,
+                'is_full' => false,
+                'approved_students' => [],
+                'occupied_students' => [],
+            ];
+        }
+
+        $stmt = $pdo->prepare("
+            SELECT
+                a.id,
+                a.student_id,
+                a.status,
+                a.applicant_type,
+                a.submitted_at,
+                a.updated_at,
+                s.student_name,
+                s.school_id_number,
+                s.email
+            FROM applications a
+            INNER JOIN (
+                SELECT student_id, MAX(id) as max_id
+                FROM applications
+                WHERE scholarship_id = ?
+                GROUP BY student_id
+            ) latest ON latest.max_id = a.id
+            JOIN students s ON s.id = a.student_id
+            WHERE a.scholarship_id = ?
+            ORDER BY COALESCE(a.updated_at, a.submitted_at) DESC, a.id DESC
+        ");
+        $stmt->execute([$scholarship_id, $scholarship_id]);
+        $latest_rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $approved_statuses = ['Approved', 'Active', 'Accepted'];
+        $occupied_statuses = ['Approved', 'Active', 'Accepted', 'For Renewal', 'Renewal Request', 'Drop Requested'];
+
+        $approved_students = [];
+        $occupied_students = [];
+
+        foreach ($latest_rows as $row) {
+            $status = trim((string) ($row['status'] ?? ''));
+            $row['display_status'] = formatApplicationStatus($status);
+
+            if (in_array($status, $approved_statuses, true)) {
+                $approved_students[] = $row;
+            }
+
+            if (in_array($status, $occupied_statuses, true)) {
+                $occupied_students[] = $row;
+            }
+        }
+
+        $available_slots = max(0, (int) ($available_slots ?? 0));
+        $approved_count = count($approved_students);
+        $occupied_count = count($occupied_students);
+        $remaining_slots = max(0, $available_slots - $occupied_count);
+
+        return [
+            'available_slots' => $available_slots,
+            'approved_count' => $approved_count,
+            'occupied_count' => $occupied_count,
+            'remaining_slots' => $remaining_slots,
+            'is_full' => $available_slots > 0 && $occupied_count >= $available_slots,
+            'approved_students' => $approved_students,
+            'occupied_students' => $occupied_students,
+        ];
+    }
+}
+
 if (!function_exists('portalSendPageCacheHeaders')) {
     function portalSendPageCacheHeaders(int $ttlSeconds, bool $private = false): void
     {
@@ -640,6 +727,9 @@ function processExpiredScholarships($pdo) {
             $app_update_stmt = $pdo->prepare("UPDATE applications SET status = 'For Renewal' WHERE scholarship_id = ? AND status = 'Active'");
             $app_update_stmt->execute([$scholarship_id]);
             $processed_students += $app_update_stmt->rowCount();
+
+            $close_stmt = $pdo->prepare("UPDATE scholarships SET accepting_new_applicants = 0 WHERE id = ?");
+            $close_stmt->execute([$scholarship_id]);
 
             // We do NOT set the scholarship to inactive, allowing renewals to proceed.
             $processed_scholarships++;

@@ -551,11 +551,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     if ($app_id && $new_status) {
         try {
             // Validation: Check limits
-            $stmt_val = $pdo->prepare("SELECT s.amount, s.amount_type FROM applications a JOIN scholarships s ON a.scholarship_id = s.id WHERE a.id = ?");
+            $stmt_val = $pdo->prepare("
+                SELECT
+                    a.scholarship_id,
+                    a.student_id,
+                    a.applicant_type,
+                    a.status as current_status,
+                    s.amount,
+                    s.amount_type,
+                    s.available_slots
+                FROM applications a
+                JOIN scholarships s ON a.scholarship_id = s.id
+                WHERE a.id = ?
+            ");
             $stmt_val->execute([$app_id]);
             $sch_data = $stmt_val->fetch(PDO::FETCH_ASSOC);
             $base_amount = $sch_data['amount'];
             $amount_type = $sch_data['amount_type'];
+            $is_capacity_occupied = in_array($sch_data['current_status'] ?? '', ['Approved', 'Active', 'Accepted', 'For Renewal', 'Renewal Request', 'Drop Requested'], true);
+            $is_new_capacity_gain = ($new_status === 'Approved') && !$is_capacity_occupied && (($sch_data['applicant_type'] ?? '') === 'New');
+            if ($is_new_capacity_gain) {
+                $capacity = getScholarshipCapacitySummary($pdo, (int) ($sch_data['scholarship_id'] ?? 0), (int) ($sch_data['available_slots'] ?? 0));
+                if (!empty($capacity['is_full'])) {
+                    throw new Exception("This scholarship has reached its slot limit. Add more slots before approving another new applicant.");
+                }
+            }
 
             if ($scholarship_percentage !== null && ($scholarship_percentage < 0 || $scholarship_percentage > 100)) {
                 throw new Exception("Percentage must be between 0 and 100.");
@@ -586,6 +606,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
                         WHERE student_id = ? AND id != ? AND status IN ('Pending', 'Pending Exam', 'Under Review')
                     ");
                     $stmt_reject->execute([$autoRejectNote, $student_id, $app_id]);
+                }
+
+                $capacity_after = getScholarshipCapacitySummary($pdo, (int) ($sch_data['scholarship_id'] ?? 0), (int) ($sch_data['available_slots'] ?? 0));
+                if (!empty($capacity_after['is_full'])) {
+                    $stmt_close = $pdo->prepare("UPDATE scholarships SET accepting_new_applicants = 0 WHERE id = ?");
+                    $stmt_close->execute([(int) ($sch_data['scholarship_id'] ?? 0)]);
                 }
             }
 
@@ -784,9 +810,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_action'])) {
 
     if (!empty($selected_ids) && in_array($bulk_status, ['Approved', 'Rejected'])) {
         $count = 0;
+        $warnings = [];
         $stmt = $pdo->prepare("UPDATE applications SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
         
         foreach ($selected_ids as $app_id) {
+            if ($bulk_status === 'Approved') {
+                $stmt_info = $pdo->prepare("
+                    SELECT
+                        a.scholarship_id,
+                        a.applicant_type,
+                        a.status as current_status,
+                        s.available_slots,
+                        s.name as scholarship_name
+                    FROM applications a
+                    JOIN scholarships s ON a.scholarship_id = s.id
+                    WHERE a.id = ?
+                ");
+                $stmt_info->execute([$app_id]);
+                $app_info = $stmt_info->fetch(PDO::FETCH_ASSOC);
+
+                if (!$app_info) {
+                    continue;
+                }
+
+                $current_status = $app_info['current_status'] ?? '';
+                $is_capacity_occupied = in_array($current_status, ['Approved', 'Active', 'Accepted', 'For Renewal', 'Renewal Request', 'Drop Requested'], true);
+                $is_new_capacity_gain = !$is_capacity_occupied && (($app_info['applicant_type'] ?? '') === 'New');
+
+                if ($is_new_capacity_gain) {
+                    $capacity = getScholarshipCapacitySummary($pdo, (int) ($app_info['scholarship_id'] ?? 0), (int) ($app_info['available_slots'] ?? 0));
+                    if (!empty($capacity['is_full'])) {
+                        $warnings[] = "Skipped approving " . ($app_info['scholarship_name'] ?? 'this scholarship') . " application #{$app_id} because the scholarship is full.";
+                        continue;
+                    }
+                }
+            }
+
             $stmt->execute([$bulk_status, $app_id]);
             
             // Auto-reject logic if Approved
@@ -813,7 +872,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_action'])) {
 
             $count++;
         }
-        flashMessage("$count applications updated to '$bulk_status'.");
+        $message = "$count applications updated to '$bulk_status'.";
+        if (!empty($warnings)) {
+            $message .= ' ' . implode(' ', $warnings);
+        }
+        flashMessage($message, !empty($warnings) ? 'warning' : 'success');
     }
     header("Location: " . buildApplicationsReturnUrl(array_merge($_GET, $_POST)));
     exit();

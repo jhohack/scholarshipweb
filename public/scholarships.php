@@ -33,6 +33,9 @@ $scholarships = portalCacheRemember($cache_key, 300, function () use ($pdo, $sea
                 s.amount_type,
                 s.deadline,
                 s.available_slots,
+                s.accepting_new_applicants,
+                s.status,
+                s.end_of_term,
                 s.description
             FROM scholarships s";
     $whereClauses = [];
@@ -64,11 +67,20 @@ $scholarships = portalCacheRemember($cache_key, 300, function () use ($pdo, $sea
             $params = array_merge($params, $categories);
         }
         $stmt->execute($params);
-        return $stmt->fetchAll();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
         return [];
     }
 });
+
+foreach ($scholarships as &$scholarship) {
+    $capacity = getScholarshipCapacitySummary($pdo, (int) ($scholarship['id'] ?? 0), (int) ($scholarship['available_slots'] ?? 0));
+    $scholarship['approved_count'] = $capacity['approved_count'];
+    $scholarship['occupied_count'] = $capacity['occupied_count'];
+    $scholarship['remaining_slots'] = $capacity['remaining_slots'];
+    $scholarship['is_full'] = $capacity['is_full'];
+}
+unset($scholarship);
 
 $scholarship_categories = [
     'Yeomchang Scholarship',

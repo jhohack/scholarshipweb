@@ -37,7 +37,7 @@ if (isset($_SESSION['user_id'])) {
                     WHERE sub.student_id = a.student_id
                     AND sub.scholarship_id = a.scholarship_id
                 )
-                AND a.status IN ('Active', 'Approved', 'For Renewal')
+                AND a.status IN ('Active', 'Approved', 'Accepted', 'For Renewal')
             ");
             $r_stmt->execute([$sid, $scholarship_id]);
             return ($r_stmt->fetchColumn() > 0);
@@ -69,6 +69,11 @@ $now = new DateTime();
 $is_open = $now <= $deadline;
 $accepting_new_applicants = !empty($scholarship['accepting_new_applicants']);
 $accepting_renewal_applicants = !empty($scholarship['accepting_renewal_applicants']);
+$capacity = getScholarshipCapacitySummary($pdo, (int) $scholarship_id, (int) ($scholarship['available_slots'] ?? 0));
+$approved_count = (int) ($capacity['approved_count'] ?? 0);
+$occupied_count = (int) ($capacity['occupied_count'] ?? 0);
+$remaining_slots = (int) ($capacity['remaining_slots'] ?? 0);
+$slots_full = !empty($capacity['is_full']);
 $apply_button_label = $is_renewal_applicant ? 'Renew Scholarship' : 'Apply Now';
 $apply_button_href = 'apply.php?id=' . $scholarship['id'];
 $can_submit_current_user = false;
@@ -80,8 +85,10 @@ if ($is_renewal_applicant) {
         $application_notice = 'Renewal applications are currently closed for this scholarship.';
     }
 } else {
-    $can_submit_current_user = $scholarship['status'] === 'active' && $is_open && $accepting_new_applicants;
-    if (!$accepting_new_applicants) {
+    $can_submit_current_user = $scholarship['status'] === 'active' && $is_open && $accepting_new_applicants && !$slots_full;
+    if ($slots_full) {
+        $application_notice = 'This scholarship has reached its slot limit and is currently full.';
+    } elseif (!$accepting_new_applicants) {
         $application_notice = 'This scholarship is not accepting new applicants right now.';
     } elseif (!$is_open) {
         $application_notice = 'The deadline for new applicants has already passed.';
@@ -185,7 +192,9 @@ if ($is_renewal_applicant) {
                     <div class="detail-card text-center">
                         <h3 class="mt-0">Application Status</h3>
                         <?php if ($is_open): ?>
-                            <span class="badge status-badge bg-success-soft text-success">Open</span>
+                            <span class="badge status-badge <?php echo $slots_full ? 'bg-danger-soft text-danger' : 'bg-success-soft text-success'; ?>">
+                                <?php echo $slots_full ? 'Full' : 'Open'; ?>
+                            </span>
                             <p class="text-muted mt-3 mb-1">Deadline:</p>
                             <p class="fw-bold fs-5"><?php echo date("F j, Y", strtotime($scholarship['deadline'])); ?></p>
                             <?php if (!empty($scholarship['end_of_term'])): ?>
@@ -196,6 +205,16 @@ if ($is_renewal_applicant) {
                             <span class="badge status-badge bg-danger-soft text-danger">Closed</span>
                             <p class="text-muted mt-3">The application deadline has passed.</p>
                         <?php endif; ?>
+                        <div class="p-3 rounded bg-light border mt-3 text-start">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="fw-bold">Slot Usage</span>
+                                <span class="badge <?php echo $slots_full ? 'bg-danger' : 'bg-primary'; ?>">
+                                    <?php echo htmlspecialchars($occupied_count . '/' . (int) $scholarship['available_slots']); ?>
+                                </span>
+                            </div>
+                            <div class="small text-muted mb-1">Approved scholars: <strong><?php echo (int) $approved_count; ?></strong></div>
+                            <div class="small text-muted">Remaining slots: <strong><?php echo (int) $remaining_slots; ?></strong></div>
+                        </div>
                         <hr>
                         <h5 class="fw-bold">Applicant Types</h5>
                         <ul class="list-unstyled">

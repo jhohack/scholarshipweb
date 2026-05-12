@@ -32,7 +32,7 @@ try {
         FROM applications a
         JOIN students st ON a.student_id = st.id
         JOIN scholarships s ON a.scholarship_id = s.id
-        WHERE a.id = ? AND st.user_id = ? AND a.status IN ('Active', 'Approved', 'For Renewal')
+        WHERE a.id = ? AND st.user_id = ? AND a.status IN ('Active', 'Approved', 'Accepted', 'For Renewal')
     ");
     $stmt->execute([$application_id, $user_id]);
     $application = $stmt->fetch(PDO::FETCH_ASSOC);

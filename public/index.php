@@ -32,6 +32,9 @@ $indexPayload = portalCacheRemember('public.index.payload', 300, function () use
                     s.amount_type,
                     s.deadline,
                     s.available_slots,
+                    s.accepting_new_applicants,
+                    s.status,
+                    s.end_of_term,
                     s.description,
                     s.requirements
                 FROM scholarships s";
@@ -129,6 +132,15 @@ $trust_stats = $indexPayload['trust_stats'] ?? [
     'students' => 0,
     'success_rate' => 0,
 ];
+
+foreach ($scholarships as &$scholarship) {
+    $capacity = getScholarshipCapacitySummary($pdo, (int) ($scholarship['id'] ?? 0), (int) ($scholarship['available_slots'] ?? 0));
+    $scholarship['approved_count'] = $capacity['approved_count'];
+    $scholarship['occupied_count'] = $capacity['occupied_count'];
+    $scholarship['remaining_slots'] = $capacity['remaining_slots'];
+    $scholarship['is_full'] = $capacity['is_full'];
+}
+unset($scholarship);
 
 // HTML output
 $page_title = 'DVC Scholarship Hub';
@@ -437,10 +449,34 @@ $page_title = 'DVC Scholarship Hub';
                         </div>
                     <?php else: ?>
                         <?php foreach ($scholarships as $scholarship): ?>
+                            <?php
+                                $capacity_state = !empty($scholarship['is_full']) ? 'full' : (!empty($scholarship['accepting_new_applicants']) ? 'open' : 'closed');
+                                $deadline_open = strtotime((string) ($scholarship['deadline'] ?? 'now')) >= time();
+                                if (!$deadline_open) {
+                                    $capacity_state = 'closed';
+                                }
+                                $state_label = match ($capacity_state) {
+                                    'full' => 'Full',
+                                    'closed' => 'Closed',
+                                    'archived' => 'Archived',
+                                    default => 'Open',
+                                };
+                                $state_class = match ($capacity_state) {
+                                    'full' => 'bg-danger',
+                                    'closed' => 'bg-secondary',
+                                    'archived' => 'bg-dark',
+                                    default => 'bg-success',
+                                };
+                                $slots_total = (int) ($scholarship['available_slots'] ?? 0);
+                                $slots_used = (int) ($scholarship['occupied_count'] ?? ($scholarship['approved_count'] ?? 0));
+                                $slots_remaining = (int) ($scholarship['remaining_slots'] ?? max(0, $slots_total - $slots_used));
+                                $can_apply = $capacity_state === 'open' && $deadline_open;
+                            ?>
                             <div class="col-md-6 col-lg-4 d-flex align-items-stretch">
                                 <div class="scholarship-card-v2 h-100 w-100 hover-lift">
-                                    <div class="card-banner">
+                                    <div class="card-banner d-flex justify-content-between align-items-start gap-2">
                                         <span class="badge category-badge"><?php echo htmlspecialchars(ucfirst($scholarship['category'])); ?></span>
+                                        <span class="badge <?php echo htmlspecialchars($state_class); ?> ms-auto"><?php echo htmlspecialchars($state_label); ?></span>
                                     </div>
                                     <div class="card-body d-flex flex-column p-4 pt-3">
                                         <div class="d-flex align-items-center mb-3">
@@ -469,8 +505,11 @@ $page_title = 'DVC Scholarship Hub';
                                                 <div class="text-muted">Deadline</div>
                                             </div>
                                             <div class="col-4">
-                                                <div class="fw-bold fs-5"><?php echo htmlspecialchars($scholarship['available_slots']); ?></div>
+                                                <div class="fw-bold fs-5"><?php echo htmlspecialchars($slots_used . '/' . $slots_total); ?></div>
                                                 <div class="text-muted">Slots</div>
+                                                <div class="small <?php echo $slots_remaining > 0 ? 'text-success' : 'text-danger'; ?>">
+                                                    <?php echo $slots_remaining > 0 ? htmlspecialchars($slots_remaining . ' left') : 'Full'; ?>
+                                                </div>
                                             </div>
                                         </div>
                                         <div class="mt-auto">
@@ -515,7 +554,9 @@ $page_title = 'DVC Scholarship Hub';
                                 ?>
                                 <p><strong>Amount:</strong> <span class="text-primary fw-bold fs-5"><?php echo htmlspecialchars($amt_display); ?></span></p>
                                 <p><strong>Deadline:</strong> <span class="text-danger fw-bold"><?php echo htmlspecialchars(date("F j, Y", strtotime($scholarship['deadline']))); ?></span></p>
-                                <p><strong>Available Slots:</strong> <?php echo htmlspecialchars($scholarship['available_slots']); ?></p>
+                                <p><strong>Status:</strong> <span class="badge <?php echo htmlspecialchars($state_class); ?>"><?php echo htmlspecialchars($state_label); ?></span></p>
+                                <p><strong>Slots:</strong> <?php echo htmlspecialchars($slots_used . '/' . $slots_total); ?></p>
+                                <p><strong>Remaining:</strong> <?php echo htmlspecialchars((string) $slots_remaining); ?></p>
                                 
                                 <h6 class="fw-bold mt-4">Description</h6>
                                 <p><?php echo nl2br(htmlspecialchars($scholarship['description'])); ?></p>
@@ -525,7 +566,11 @@ $page_title = 'DVC Scholarship Hub';
                             </div>
                             <div class="modal-footer">
                                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                                <a href="apply.php?id=<?php echo $scholarship['id']; ?>" class="btn btn-primary"><i class="bi bi-send-check-fill me-2"></i>Apply Now</a>
+                                <?php if ($can_apply): ?>
+                                    <a href="apply.php?id=<?php echo $scholarship['id']; ?>" class="btn btn-primary"><i class="bi bi-send-check-fill me-2"></i>Apply Now</a>
+                                <?php else: ?>
+                                    <button type="button" class="btn btn-primary" disabled><i class="bi bi-send-check-fill me-2"></i>Apply Now</button>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>
@@ -548,15 +593,51 @@ $page_title = 'DVC Scholarship Hub';
                     <?php else: ?>
                         <?php // Display up to 3 scholarships with the nearest deadlines ?>
                         <?php foreach (array_slice($scholarships, 0, 3) as $index => $scholarship): ?>
+                            <?php
+                                $capacity_state = !empty($scholarship['is_full']) ? 'full' : (!empty($scholarship['accepting_new_applicants']) ? 'open' : 'closed');
+                                $deadline_open = strtotime((string) ($scholarship['deadline'] ?? 'now')) >= time();
+                                if (!$deadline_open) {
+                                    $capacity_state = 'closed';
+                                }
+                                $state_label = match ($capacity_state) {
+                                    'full' => 'Full',
+                                    'closed' => 'Closed',
+                                    'archived' => 'Archived',
+                                    default => 'Open',
+                                };
+                                $state_class = match ($capacity_state) {
+                                    'full' => 'bg-danger',
+                                    'closed' => 'bg-secondary',
+                                    'archived' => 'bg-dark',
+                                    default => 'bg-success',
+                                };
+                                $slots_total = (int) ($scholarship['available_slots'] ?? 0);
+                                $slots_used = (int) ($scholarship['occupied_count'] ?? ($scholarship['approved_count'] ?? 0));
+                                $slots_remaining = (int) ($scholarship['remaining_slots'] ?? max(0, $slots_total - $slots_used));
+                                $can_apply = $capacity_state === 'open' && $deadline_open;
+                            ?>
                             <div class="col-md-6 col-lg-4" data-aos="fade-up" data-aos-delay="<?php echo ($index + 1) * 100; ?>">
                                 <div class="card h-100 text-center shadow-sm border-0">
                                     <div class="card-body d-flex flex-column">
                                         <h5 class="card-title fw-bold"><?php echo htmlspecialchars($scholarship['name']); ?></h5>
+                                        <span class="badge <?php echo htmlspecialchars($state_class); ?> mx-auto mb-2"><?php echo htmlspecialchars($state_label); ?></span>
                                         <p class="card-text text-danger fw-bold">
                                             <i class="bi bi-clock"></i> Deadline: <?php echo htmlspecialchars(date("F j, Y", strtotime($scholarship['deadline']))); ?>
                                         </p>
                                         <p class="card-text text-muted flex-grow-1"><?php echo htmlspecialchars(substr($scholarship['description'], 0, 80)) . '...'; ?></p>
-                                        <a href="apply.php?id=<?php echo $scholarship['id']; ?>" class="btn btn-primary mt-auto">Apply Now</a>
+                                        <div class="small text-muted mb-3">
+                                            <?php echo htmlspecialchars($slots_used . '/' . $slots_total); ?> slots filled
+                                            <?php if ($slots_remaining > 0): ?>
+                                                <span class="text-success">, <?php echo htmlspecialchars($slots_remaining . ' left'); ?></span>
+                                            <?php else: ?>
+                                                <span class="text-danger">, full</span>
+                                            <?php endif; ?>
+                                        </div>
+                                        <?php if ($can_apply): ?>
+                                            <a href="apply.php?id=<?php echo $scholarship['id']; ?>" class="btn btn-primary mt-auto">Apply Now</a>
+                                        <?php else: ?>
+                                            <a href="scholarship-details.php?id=<?php echo $scholarship['id']; ?>" class="btn btn-outline-primary mt-auto">View Details</a>
+                                        <?php endif; ?>
                                     </div>
                                 </div>
                             </div>

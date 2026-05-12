@@ -113,6 +113,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $action = 'list'; // Redirect to list view after successful save
                 }
             }
+            // --- Add Slots to an Existing Scholarship ---
+            elseif ($post_action === 'add_scholarship_slots') {
+                $id = filter_input(INPUT_POST, 'scholarship_id', FILTER_SANITIZE_NUMBER_INT);
+                $additional_slots = filter_input(INPUT_POST, 'additional_slots', FILTER_VALIDATE_INT);
+
+                if ($id && $additional_slots !== false && $additional_slots > 0) {
+                    $stmt = $pdo->prepare("SELECT id, name, available_slots, status FROM scholarships WHERE id = ? LIMIT 1");
+                    $stmt->execute([$id]);
+                    $scholarship = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                    if ($scholarship) {
+                        if (($scholarship['status'] ?? '') === 'archived') {
+                            $errors[] = "Archived scholarships cannot be reopened. Create a new scholarship term instead.";
+                        } else {
+                            $current_slots = max(0, (int) ($scholarship['available_slots'] ?? 0));
+                            $new_total_slots = $current_slots + (int) $additional_slots;
+
+                            $stmt = $pdo->prepare("
+                                UPDATE scholarships
+                                SET available_slots = ?, accepting_new_applicants = 1
+                                WHERE id = ?
+                            ");
+                            $stmt->execute([$new_total_slots, $id]);
+
+                            $success = sprintf(
+                                'Added %d slot(s) to %s. New total: %d.',
+                                (int) $additional_slots,
+                                $scholarship['name'],
+                                $new_total_slots
+                            );
+                        }
+                    } else {
+                        $errors[] = "Scholarship not found.";
+                    }
+                } else {
+                    $errors[] = "Please enter a valid number of additional slots.";
+                }
+
+                $action = 'list';
+            }
             // --- Archive/Restore Scholarship ---
             elseif ($post_action === 'archive_scholarship' || $post_action === 'restore_scholarship') {
                 $id = filter_input(INPUT_POST, 'scholarship_id', FILTER_SANITIZE_NUMBER_INT);
@@ -160,6 +200,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt = $pdo->prepare("UPDATE applications SET status = 'Rejected', remarks = 'Scholarship term has ended. Please re-apply for the new term.', updated_at = CURRENT_TIMESTAMP WHERE scholarship_id = ? AND status IN ('Pending', 'Pending Exam', 'Under Review')");
                     $stmt->execute([$id]);
                     $pending_count = $stmt->rowCount();
+
+                    // 2b. Close new applications for the ended term
+                    $stmt = $pdo->prepare("UPDATE scholarships SET accepting_new_applicants = 0 WHERE id = ?");
+                    $stmt->execute([$id]);
 
                     // 3. Send Emails
                     if (!empty($students_to_notify)) {
@@ -310,6 +354,25 @@ switch ($action) {
             $stmt = $pdo->prepare("SELECT * FROM scholarships WHERE id = ?");
             $stmt->execute([$scholarship_id]);
             $scholarship = $stmt->fetch(PDO::FETCH_ASSOC);
+        } elseif ($action === 'add') {
+            $clone_id = filter_input(INPUT_GET, 'clone_id', FILTER_SANITIZE_NUMBER_INT);
+            if ($clone_id) {
+                $stmt = $pdo->prepare("SELECT * FROM scholarships WHERE id = ? LIMIT 1");
+                $stmt->execute([$clone_id]);
+                $source_scholarship = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if ($source_scholarship) {
+                    $scholarship = $source_scholarship;
+                    $scholarship['id'] = '';
+                    $scholarship['name'] = trim(($source_scholarship['name'] ?? 'Scholarship') . ' - New Term');
+                    $scholarship['deadline'] = '';
+                    $scholarship['end_of_term'] = '';
+                    $scholarship['status'] = 'inactive';
+                    $scholarship['requires_exam'] = 0;
+                    $scholarship['accepting_new_applicants'] = 1;
+                    $scholarship['accepting_renewal_applicants'] = 1;
+                }
+            }
         }
         $scholarship_categories = [
             'Yeomchang Scholarship',
@@ -915,6 +978,17 @@ switch ($action) {
             ";
             $active_scholarships = $pdo->query($active_sql)->fetchAll(PDO::FETCH_ASSOC);
 
+            foreach ($active_scholarships as &$scholarship) {
+                $capacity = getScholarshipCapacitySummary($pdo, (int) ($scholarship['id'] ?? 0), (int) ($scholarship['available_slots'] ?? 0));
+                $scholarship['approved_count'] = $capacity['approved_count'];
+                $scholarship['occupied_count'] = $capacity['occupied_count'];
+                $scholarship['remaining_slots'] = $capacity['remaining_slots'];
+                $scholarship['is_full'] = $capacity['is_full'];
+                $scholarship['approved_students'] = $capacity['approved_students'];
+                $scholarship['occupied_students'] = $capacity['occupied_students'];
+            }
+            unset($scholarship);
+
             // Fetch archived scholarships (counts are less critical here, so a simple query is fine)
             $archived_sql = "SELECT * FROM scholarships WHERE status = 'archived' ORDER BY created_at DESC";
             $archived_scholarships = $pdo->query($archived_sql)->fetchAll(PDO::FETCH_ASSOC);
@@ -948,7 +1022,7 @@ switch ($action) {
                     <thead class="table-light">
                         <tr>
                             <th>Name</th>
-                            <th class="text-center">Statistics (Total/New/Renewal)</th>
+                            <th class="text-center">Approved / Slots</th>
                             <th>Slots</th>
                             <th>End of Term</th>
                             <th class="text-end">Actions</th>
@@ -957,21 +1031,47 @@ switch ($action) {
                     <tbody>
                         <?php if (empty($active_scholarships)): ?>
                             <tr>
-                                <td colspan="6" class="text-center text-muted py-4">No active scholarships found. <a href="scholarships.php?action=add">Create one now</a>.</td>
+                                <td colspan="5" class="text-center text-muted py-4">No active scholarships found. <a href="scholarships.php?action=add">Create one now</a>.</td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($active_scholarships as $scholarship): ?>
                                 <tr>
                                     <td><a href="scholarships.php?action=view&id=<?php echo $scholarship['id']; ?>" class="fw-bold text-decoration-none"><?php echo htmlspecialchars($scholarship['name']); ?></a></td>
                                     <td class="text-center">
-                                        <?php $total_applicants = ($scholarship['new_applicants'] ?? 0) + ($scholarship['renewal_applicants'] ?? 0); ?>
                                         <div class="mb-1">
-                                            <span class="fw-bold fs-5"><?php echo $total_applicants; ?></span>
-                                            <span class="text-muted small">Total Applicants</span>
+                                            <span class="fw-bold fs-5"><?php echo (int) ($scholarship['approved_count'] ?? 0); ?></span>
+                                            <span class="text-muted small">Approved Scholars</span>
                                         </div>
                                         <div class="d-flex justify-content-center gap-2">
-                                            <span class="badge bg-light text-primary border border-primary" title="New Applicants"><i class="bi bi-person-plus"></i> <?php echo (int)($scholarship['new_applicants'] ?? 0); ?></span>
-                                            <span class="badge bg-light text-success border border-success" title="Renewal Applicants"><i class="bi bi-arrow-repeat"></i> <?php echo (int)($scholarship['renewal_applicants'] ?? 0); ?></span>
+                                            <?php
+                                                $state = 'open';
+                                                if (($scholarship['status'] ?? '') === 'inactive') {
+                                                    $state = 'draft';
+                                                } elseif (!empty($scholarship['deadline']) && strtotime((string) $scholarship['deadline']) < time()) {
+                                                    $state = 'closed';
+                                                } elseif (!empty($scholarship['is_full'])) {
+                                                    $state = 'full';
+                                                } elseif (empty($scholarship['accepting_new_applicants'])) {
+                                                    $state = 'closed';
+                                                }
+                                                $state_label = match ($state) {
+                                                    'full' => 'Full',
+                                                    'closed' => 'Closed',
+                                                    'draft' => 'Draft',
+                                                    default => 'Open',
+                                                };
+                                                $state_class = match ($state) {
+                                                    'full' => 'bg-danger',
+                                                    'closed' => 'bg-secondary',
+                                                    'draft' => 'bg-warning text-dark',
+                                                    default => 'bg-success',
+                                                };
+                                            ?>
+                                            <span class="badge bg-light text-primary border border-primary" title="Occupied Slots"><i class="bi bi-people-fill"></i> <?php echo (int) ($scholarship['occupied_count'] ?? 0); ?>/<?php echo (int) ($scholarship['available_slots'] ?? 0); ?></span>
+                                            <span class="badge <?php echo $state_class; ?>" title="Capacity State"><?php echo $state_label; ?></span>
+                                        </div>
+                                        <div class="small text-muted mt-1">
+                                            <?php echo (int) ($scholarship['remaining_slots'] ?? 0); ?> remaining
                                         </div>
                                     </td>
                                     <td><?php echo htmlspecialchars($scholarship['available_slots']); ?></td>
@@ -999,6 +1099,28 @@ switch ($action) {
                                                     Actions
                                                 </button>
                                                 <ul class="dropdown-menu dropdown-menu-end">
+                                                    <li>
+                                                        <button
+                                                            type="button"
+                                                            class="dropdown-item text-primary"
+                                                            data-bs-toggle="modal"
+                                                            data-bs-target="#manageSlotsModal"
+                                                            data-scholarship-id="<?php echo (int) $scholarship['id']; ?>"
+                                                            data-scholarship-name="<?php echo htmlspecialchars($scholarship['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                                            data-approved-count="<?php echo (int) ($scholarship['approved_count'] ?? 0); ?>"
+                                                            data-occupied-count="<?php echo (int) ($scholarship['occupied_count'] ?? 0); ?>"
+                                                            data-available-slots="<?php echo (int) ($scholarship['available_slots'] ?? 0); ?>"
+                                                            data-remaining-slots="<?php echo (int) ($scholarship['remaining_slots'] ?? 0); ?>"
+                                                            data-deadline="<?php echo htmlspecialchars($scholarship['deadline'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                                                            data-status="<?php echo htmlspecialchars($scholarship['status'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                                                            data-accepting-new="<?php echo !empty($scholarship['accepting_new_applicants']) ? '1' : '0'; ?>"
+                                                            data-is-full="<?php echo !empty($scholarship['is_full']) ? '1' : '0'; ?>"
+                                                            data-approved-students="<?php echo htmlspecialchars(json_encode($scholarship['approved_students'] ?? []), ENT_QUOTES, 'UTF-8'); ?>"
+                                                            data-clone-url="scholarships.php?action=add&amp;clone_id=<?php echo (int) $scholarship['id']; ?>"
+                                                        >
+                                                            <i class="bi bi-sliders me-2"></i>Manage Slots
+                                                        </button>
+                                                    </li>
                                                     <li><a class="dropdown-item" href="scholarships.php?action=manage_exam&id=<?php echo $scholarship['id']; ?>"><i class="bi bi-pencil-square me-2"></i>Manage Exam</a></li>
                                                     <li><a class="dropdown-item" href="scholarships.php?action=manage_form&id=<?php echo $scholarship['id']; ?>"><i class="bi bi-ui-checks me-2"></i>Manage Form</a></li>
                                                     <li><a class="dropdown-item" href="scholarships.php?action=edit&id=<?php echo $scholarship['id']; ?>"><i class="bi bi-pencil-fill me-2"></i>Edit Details</a></li>
@@ -1054,7 +1176,7 @@ switch ($action) {
                     <tbody>
                         <?php if (empty($archived_scholarships)): ?>
                             <tr>
-                                <td colspan="5" class="text-center text-muted py-4">No archived scholarships found.</td>
+                                <td colspan="3" class="text-center text-muted py-4">No archived scholarships found.</td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($archived_scholarships as $scholarship): ?>
@@ -1093,6 +1215,81 @@ switch ($action) {
                         <?php endif; ?>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- Manage Slots Modal -->
+        <div class="modal fade" id="manageSlotsModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header border-0">
+                        <div>
+                            <h5 class="modal-title fw-bold mb-1">Manage Slots</h5>
+                            <p class="text-muted small mb-0">Extend the current scholarship or start a fresh term from the same template.</p>
+                        </div>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body pt-0">
+                        <div class="row g-3">
+                            <div class="col-lg-5">
+                                <div class="p-3 border rounded bg-light h-100">
+                                    <div class="text-muted small">Scholarship</div>
+                                    <div class="fw-bold fs-5 mb-3" id="manageSlotsScholarshipName">-</div>
+                                    <div class="d-flex justify-content-between mb-2">
+                                        <span class="text-muted">Approved Scholars</span>
+                                        <strong id="manageSlotsApprovedCount">0</strong>
+                                    </div>
+                                    <div class="d-flex justify-content-between mb-2">
+                                        <span class="text-muted">Occupied Slots</span>
+                                        <strong id="manageSlotsOccupiedCount">0</strong>
+                                    </div>
+                                    <div class="d-flex justify-content-between mb-2">
+                                        <span class="text-muted">Total Slots</span>
+                                        <strong id="manageSlotsAvailableSlots">0</strong>
+                                    </div>
+                                    <div class="d-flex justify-content-between mb-3">
+                                        <span class="text-muted">Remaining</span>
+                                        <strong id="manageSlotsRemainingSlots">0</strong>
+                                    </div>
+                                    <div class="mb-3">
+                                        <span class="badge" id="manageSlotsStateBadge">Open</span>
+                                    </div>
+                                    <p class="small text-muted mb-0">
+                                        Approved scholars are listed on the right. Occupied slots include current scholars waiting on renewal or drop decisions.
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="col-lg-7">
+                                <div class="p-3 border rounded h-100">
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <h6 class="fw-bold mb-0">Approved Students</h6>
+                                        <span class="badge bg-primary-soft text-primary" id="manageSlotsApprovedCountBadge">0 Approved</span>
+                                    </div>
+                                    <div id="manageSlotsStudents" class="list-group small"></div>
+                                    <div class="alert alert-info small mt-3 mb-0">
+                                        Tip: if this term is already complete, create a new term instead of stacking all future applicants into the same record.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-0 flex-column align-items-stretch gap-3">
+                        <form action="scholarships.php" method="POST" class="d-flex flex-wrap gap-2 align-items-end w-100">
+                            <input type="hidden" name="action" value="add_scholarship_slots">
+                            <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                            <input type="hidden" name="scholarship_id" id="manageSlotsScholarshipId" value="">
+                            <div class="flex-grow-1">
+                                <label for="manageSlotsAdditional" class="form-label mb-1">Add Slots</label>
+                                <input type="number" class="form-control" id="manageSlotsAdditional" name="additional_slots" min="1" value="1" required>
+                            </div>
+                            <button type="submit" id="manageSlotsAddButton" class="btn btn-success"><i class="bi bi-plus-circle-fill me-2"></i>Add Slots & Reopen</button>
+                        </form>
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 w-100">
+                            <small class="text-muted">For a brand-new intake period, use the copied template instead of extending this cycle.</small>
+                            <a href="#" class="btn btn-outline-primary" id="manageSlotsCloneLink"><i class="bi bi-files me-2"></i>Create New Term</a>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         <?php
@@ -1137,9 +1334,111 @@ switch ($action) {
                     examModal.show();
                 });
             </script>
-            <?php
+        <?php
         }
         ?>
+        <script>
+            function escapeHtml(value) {
+                return String(value)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+            }
+
+            const manageSlotsModal = document.getElementById('manageSlotsModal');
+            if (manageSlotsModal) {
+                manageSlotsModal.addEventListener('show.bs.modal', function(event) {
+                    const trigger = event.relatedTarget;
+                    if (!trigger) {
+                        return;
+                    }
+
+                    const scholarshipId = trigger.getAttribute('data-scholarship-id') || '';
+                    const scholarshipName = trigger.getAttribute('data-scholarship-name') || 'Scholarship';
+                    const approvedCount = parseInt(trigger.getAttribute('data-approved-count') || '0', 10);
+                    const occupiedCount = parseInt(trigger.getAttribute('data-occupied-count') || '0', 10);
+                    const availableSlots = parseInt(trigger.getAttribute('data-available-slots') || '0', 10);
+                    const remainingSlots = parseInt(trigger.getAttribute('data-remaining-slots') || '0', 10);
+                    const deadline = trigger.getAttribute('data-deadline') || '';
+                    const status = trigger.getAttribute('data-status') || 'active';
+                    const acceptingNew = trigger.getAttribute('data-accepting-new') === '1';
+                    const isFull = trigger.getAttribute('data-is-full') === '1' || (availableSlots > 0 && occupiedCount >= availableSlots);
+                    const cloneUrl = trigger.getAttribute('data-clone-url') || '#';
+                    const deadlineOpen = !deadline || new Date(deadline + 'T00:00:00').getTime() >= Date.now();
+
+                    let stateLabel = 'Open';
+                    let stateClass = 'bg-success';
+                    if (status === 'archived') {
+                        stateLabel = 'Archived';
+                        stateClass = 'bg-dark';
+                    } else if (status === 'inactive') {
+                        stateLabel = 'Draft';
+                        stateClass = 'bg-warning text-dark';
+                    } else if (!deadlineOpen) {
+                        stateLabel = 'Closed';
+                        stateClass = 'bg-secondary';
+                    } else if (isFull) {
+                        stateLabel = 'Full';
+                        stateClass = 'bg-danger';
+                    } else if (!acceptingNew) {
+                        stateLabel = 'Closed';
+                        stateClass = 'bg-secondary';
+                    }
+
+                    document.getElementById('manageSlotsScholarshipName').textContent = scholarshipName;
+                    document.getElementById('manageSlotsApprovedCount').textContent = approvedCount.toString();
+                    document.getElementById('manageSlotsOccupiedCount').textContent = occupiedCount.toString();
+                    document.getElementById('manageSlotsAvailableSlots').textContent = availableSlots.toString();
+                    document.getElementById('manageSlotsRemainingSlots').textContent = remainingSlots.toString();
+
+                    const stateBadge = document.getElementById('manageSlotsStateBadge');
+                    stateBadge.className = 'badge ' + stateClass;
+                    stateBadge.textContent = stateLabel;
+
+                    const approvedBadge = document.getElementById('manageSlotsApprovedCountBadge');
+                    approvedBadge.textContent = approvedCount.toString() + ' Approved';
+
+                    const addSlotsButton = document.getElementById('manageSlotsAddButton');
+                    const additionalInput = document.getElementById('manageSlotsAdditional');
+                    if (addSlotsButton && additionalInput) {
+                        addSlotsButton.disabled = !deadlineOpen;
+                        additionalInput.disabled = !deadlineOpen;
+                    }
+
+                    document.getElementById('manageSlotsScholarshipId').value = scholarshipId;
+                    document.getElementById('manageSlotsCloneLink').setAttribute('href', cloneUrl);
+
+                    const students = JSON.parse(trigger.getAttribute('data-approved-students') || '[]');
+                    const studentsContainer = document.getElementById('manageSlotsStudents');
+
+                    if (!Array.isArray(students) || students.length === 0) {
+                        studentsContainer.innerHTML = '<div class="list-group-item text-muted">No approved scholars yet.</div>';
+                        return;
+                    }
+
+                    studentsContainer.innerHTML = students.map(function(student) {
+                        const name = student.student_name || 'Student';
+                        const schoolId = student.school_id_number || '';
+                        const displayStatus = student.display_status || student.status || 'Approved';
+                        const statusClass = displayStatus === 'For Renewal' ? 'bg-warning text-dark' : 'bg-success';
+
+                        return `
+                            <div class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-start gap-3">
+                                    <div>
+                                        <div class="fw-bold">${escapeHtml(name)}</div>
+                                        <div class="text-muted small">${escapeHtml(schoolId)}</div>
+                                    </div>
+                                    <span class="badge ${statusClass}">${escapeHtml(displayStatus)}</span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                });
+            }
+        </script>
         <?php
         break;
 }

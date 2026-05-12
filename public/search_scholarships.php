@@ -21,6 +21,9 @@ $response = portalCacheRemember($cache_key, 180, function () use ($pdo, $search,
                 s.amount_type,
                 s.deadline,
                 s.available_slots,
+                s.accepting_new_applicants,
+                s.status,
+                s.end_of_term,
                 s.description
             FROM scholarships s";
     $whereClauses = [];
@@ -52,40 +55,47 @@ $response = portalCacheRemember($cache_key, 180, function () use ($pdo, $search,
             $params = array_merge($params, $categories);
         }
         $stmt->execute($params);
-        $scholarships = $stmt->fetchAll();
+        $scholarships = $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
         $scholarships = [];
     }
 
-    $html = '';
-    $count = count($scholarships);
-
-    if (empty($scholarships)) {
-        $html = '
-        <div class="col-12">
-            <div class="no-results-card" data-aos="fade-up">
-                <div class="icon"><i class="bi bi-search-heart"></i></div>
-                <h4 class="fw-bold">No Scholarships Found</h4>
-                <p class="text-muted">We couldn\'t find any scholarships matching your criteria. <br>Try adjusting your filters or check back later!</p>
-                <a href="scholarships.php" class="btn btn-primary mt-3">Clear Filters</a>
-            </div>
-        </div>';
-    } else {
-        foreach ($scholarships as $index => $scholarship) {
-            ob_start();
-            $card_link = 'scholarship-details.php?id=' . $scholarship['id'];
-            $card_button_text = 'View Details';
-            echo '<div class="col-md-6 col-lg-4 d-flex align-items-stretch" data-aos="fade-up" data-aos-delay="' . (($index % 3) * 100) . '">';
-            include 'scholarship_card.php';
-            echo '</div>';
-            $html .= ob_get_clean();
-        }
-    }
-
-    return ['html' => $html, 'count' => $count];
+    return ['scholarships' => $scholarships];
 });
 
+$responseRows = $response['scholarships'] ?? [];
+$html = '';
+$count = count($responseRows);
+
+if (empty($responseRows)) {
+    $html = '
+    <div class="col-12">
+        <div class="no-results-card" data-aos="fade-up">
+            <div class="icon"><i class="bi bi-search-heart"></i></div>
+            <h4 class="fw-bold">No Scholarships Found</h4>
+            <p class="text-muted">We couldn\'t find any scholarships matching your criteria. <br>Try adjusting your filters or check back later!</p>
+            <a href="scholarships.php" class="btn btn-primary mt-3">Clear Filters</a>
+        </div>
+    </div>';
+} else {
+    foreach ($responseRows as $index => $scholarship) {
+        $capacity = getScholarshipCapacitySummary($pdo, (int) ($scholarship['id'] ?? 0), (int) ($scholarship['available_slots'] ?? 0));
+        $scholarship['approved_count'] = $capacity['approved_count'];
+        $scholarship['occupied_count'] = $capacity['occupied_count'];
+        $scholarship['remaining_slots'] = $capacity['remaining_slots'];
+        $scholarship['is_full'] = $capacity['is_full'];
+
+        ob_start();
+        $card_link = 'scholarship-details.php?id=' . $scholarship['id'];
+        $card_button_text = 'View Details';
+        echo '<div class="col-md-6 col-lg-4 d-flex align-items-stretch" data-aos="fade-up" data-aos-delay="' . (($index % 3) * 100) . '">';
+        include 'scholarship_card.php';
+        echo '</div>';
+        $html .= ob_get_clean();
+    }
+}
+
 header('Content-Type: application/json');
-echo json_encode($response);
+echo json_encode(['html' => $html, 'count' => $count]);
 exit();
 ?>

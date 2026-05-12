@@ -11,7 +11,7 @@ checkSessionTimeout();
 
 // Ensure the user is logged in as a student
 if (!isStudent()) {
-    header("Location: ../login.php");
+    header("Location: ../public/login.php");
     exit();
 }
 
