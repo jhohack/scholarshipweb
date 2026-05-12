@@ -1364,7 +1364,7 @@ switch ($action) {
                     const deadline = trigger.getAttribute('data-deadline') || '';
                     const status = trigger.getAttribute('data-status') || 'active';
                     const acceptingNew = trigger.getAttribute('data-accepting-new') === '1';
-                    const isFull = trigger.getAttribute('data-is-full') === '1' || (availableSlots > 0 && occupiedCount >= availableSlots);
+                    const isFull = trigger.getAttribute('data-is-full') === '1' || availableSlots === 0 || occupiedCount >= availableSlots;
                     const cloneUrl = trigger.getAttribute('data-clone-url') || '#';
                     const deadlineOpen = !deadline || new Date(deadline + 'T00:00:00').getTime() >= Date.now();
 
