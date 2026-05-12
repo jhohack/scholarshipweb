@@ -39,7 +39,13 @@ if (!function_exists('mailIsConfigured')) {
 if (!function_exists('mailConfigurationErrorMessage')) {
     function mailConfigurationErrorMessage(): string
     {
-        return 'Email sending is not configured yet. Please add the SMTP settings in the deployment environment.';
+        $issues = mailConfigurationIssues();
+
+        if ($issues !== []) {
+            return 'Email sending is not configured yet. Missing: ' . implode(', ', $issues) . '.';
+        }
+
+        return 'Email sending is configured, but the message could not be sent. Please check the SMTP account, password, or mail provider limits.';
     }
 }
 
