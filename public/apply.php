@@ -482,8 +482,33 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $program = ($selected_program !== '') ? $selected_program : null;
     $year_program = ($year_level && $program) ? $year_level . ' - ' . $program : null;
 
-    $units_enrolled = filter_input(INPUT_POST, 'units_enrolled', FILTER_SANITIZE_NUMBER_INT);
-    $gwa = filter_input(INPUT_POST, 'gwa', FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION);
+    $units_enrolled_raw = trim((string) ($_POST['units_enrolled'] ?? ''));
+    $gwa_raw = trim((string) ($_POST['gwa'] ?? ''));
+    $units_enrolled = null;
+    $gwa = null;
+
+    if ($units_enrolled_raw !== '') {
+        if (preg_match('/^\d+$/', $units_enrolled_raw)) {
+            $units_enrolled = (int) $units_enrolled_raw;
+            if ($units_enrolled <= 0) {
+                $errors[] = "Units Enrolled must be greater than zero.";
+            }
+        } else {
+            $errors[] = "Units Enrolled must be a whole number.";
+        }
+    }
+
+    if ($gwa_raw !== '') {
+        $normalized_gwa = str_replace(',', '.', $gwa_raw);
+        if (preg_match('/^\d+(\.\d{1,2})?$/', $normalized_gwa)) {
+            $gwa = (float) $normalized_gwa;
+            if ($gwa < 1 || $gwa > 100) {
+                $errors[] = "GWA must be between 1.00 and 100.00.";
+            }
+        } else {
+            $errors[] = "GWA must be a valid number, for example 90 or 90.50.";
+        }
+    }
 
     // Get the student ID associated with the logged-in user.
     $student_id = getCurrentStudentId($pdo, (int) $user_id);
