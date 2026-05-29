@@ -43,8 +43,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $birth_date_obj = new DateTime($birthdate);
         $today = new DateTime();
         $age = $today->diff($birth_date_obj)->y;
-        if ($age < 18) {
-            $errors[] = "You must be at least 18 years old to register.";
+        if ($age < 15) {
+            $errors[] = "You must be at least 15 years old to register.";
         }
     }
     if (strlen($password) < 8) {
@@ -194,13 +194,13 @@ $page_title = 'Register';
                                                 <div class="col-4">
                                                     <select class="form-select" id="birth_year" name="birth_year" required>
                                                         <option value="" disabled selected>Year</option>
-                                                        <?php for ($y = date('Y') - 18; $y >= date('Y') - 100; $y--): ?>
+                                                        <?php for ($y = date('Y') - 15; $y >= date('Y') - 100; $y--): ?>
                                                             <option value="<?php echo $y; ?>" <?php echo (isset($_POST['birth_year']) && $_POST['birth_year'] == $y) ? 'selected' : ''; ?>><?php echo $y; ?></option>
                                                         <?php endfor; ?>
                                                     </select>
                                                 </div>
                                             </div>
-                                            <div class="invalid-feedback" id="birthdate-feedback">Please select a valid birthdate. You must be at least 18.</div>
+                                            <div class="invalid-feedback" id="birthdate-feedback">Please select a valid birthdate. You must be at least 15.</div>
                                         </div>
                                         <div class="mb-3">
                                             <label for="email" class="form-label">Email Address</label>
@@ -275,8 +275,17 @@ $page_title = 'Register';
             const strengthBar = document.getElementById('password-strength-bar');
             const submitBtn = document.getElementById('submit-btn');
             const birthdateFeedback = document.getElementById('birthdate-feedback');
+            const submitBtnDefaultHtml = submitBtn.innerHTML;
 
             let emailCheckTimeout;
+            let isSubmitting = false;
+
+            const setSubmitLoading = (isLoading) => {
+                submitBtn.disabled = isLoading;
+                submitBtn.innerHTML = isLoading
+                    ? '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Creating Account...'
+                    : submitBtnDefaultHtml;
+            };
 
             // Function to toggle password visibility
             const toggleVisibility = (inputField, icon) => {
@@ -362,22 +371,43 @@ $page_title = 'Register';
                     age--;
                 }
 
-                if (age < 18) {
+                if (age < 15) {
                     birthYear.classList.add('is-invalid');
-                    birthdateFeedback.textContent = 'You must be at least 18 years old to register.';
+                    birthdateFeedback.textContent = 'You must be at least 15 years old to register.';
                     return false;
                 }
                 return true;
             };
 
+            const focusFirstInvalidField = () => {
+                const firstInvalid = form.querySelector('.is-invalid, :invalid');
+                if (!firstInvalid) {
+                    return;
+                }
+
+                firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                if (typeof firstInvalid.focus === 'function') {
+                    firstInvalid.focus({ preventScroll: true });
+                }
+            };
+
             // AJAX email validation
             const checkEmailOnServer = async (emailValue) => {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 4000);
+
                 try {
                     const response = await fetch('check-email.php', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email: emailValue })
+                        body: JSON.stringify({ email: emailValue }),
+                        signal: controller.signal
                     });
+
+                    if (!response.ok) {
+                        return true;
+                    }
+
                     const data = await response.json();
                     if (data.exists) {
                         email.classList.remove('is-valid');
@@ -391,6 +421,8 @@ $page_title = 'Register';
                 } catch (error) {
                     console.error('Email check failed:', error);
                     return true; // Fail open, allow submission
+                } finally {
+                    clearTimeout(timeout);
                 }
             };
 
@@ -423,6 +455,10 @@ $page_title = 'Register';
                 event.preventDefault();
                 event.stopPropagation();
 
+                if (isSubmitting) {
+                    return;
+                }
+
                 // Manually trigger validation on all fields
                 const isFirstNameValid = validateField(firstName);
                 const isLastNameValid = validateField(lastName);
@@ -431,23 +467,30 @@ $page_title = 'Register';
                 const isConfirmPasswordValid = validateConfirmPassword();
                 const isBirthdateValid = validateBirthdate();
 
+                if (!(isFirstNameValid && isLastNameValid && isEmailValid && isPasswordValid && isConfirmPasswordValid && isBirthdateValid)) {
+                    form.classList.add('was-validated');
+                    focusFirstInvalidField();
+                    return;
+                }
+
+                isSubmitting = true;
+                setSubmitLoading(true);
+
                 let isEmailAvailable = true;
                 if (isEmailValid) {
                     // Final check before submitting
                     isEmailAvailable = await checkEmailOnServer(email.value);
                 }
 
-                if (isFirstNameValid && isLastNameValid && isEmailValid && isPasswordValid && isConfirmPasswordValid && isEmailAvailable && isBirthdateValid) {
+                if (isEmailAvailable) {
                     // If all is good, submit the form
-                    submitBtn.disabled = true;
-                    submitBtn.innerHTML = `
-                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                        Creating Account...
-                    `;
                     form.submit();
                 } else {
                     // Add 'was-validated' to show all messages if needed, but our live validation is better
+                    isSubmitting = false;
+                    setSubmitLoading(false);
                     form.classList.add('was-validated');
+                    focusFirstInvalidField();
                 }
             });
 
