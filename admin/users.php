@@ -357,7 +357,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 }
 
 // --- Fetching Logic with Filtering and Searching ---
-$search_query = $_GET['search'] ?? '';
+$search_query = trim((string) ($_GET['search'] ?? ''));
 $filter_role = $_GET['role'] ?? '';
 $page = isset($_GET['page']) && is_numeric($_GET['page']) ? (int)$_GET['page'] : 1;
 $per_page = 10;
@@ -373,9 +373,22 @@ try {
     $whereClauses = [];
     $params = [];
 
-    if (!empty($search_query)) {
-        $whereClauses[] = "(u.first_name LIKE :search OR u.last_name LIKE :search OR u.school_id LIKE :search OR s.student_name LIKE :search OR s.school_id_number LIKE :search)";
-        $params['search'] = '%' . $search_query . '%';
+    if ($search_query !== '') {
+        $whereClauses[] = "(
+            LOWER(COALESCE(u.first_name, '')) LIKE :search
+            OR LOWER(COALESCE(u.middle_name, '')) LIKE :search
+            OR LOWER(COALESCE(u.last_name, '')) LIKE :search
+            OR LOWER(COALESCE(u.email, '')) LIKE :search
+            OR LOWER(COALESCE(u.school_id, '')) LIKE :search
+            OR LOWER(COALESCE(s.student_name, '')) LIKE :search
+            OR LOWER(COALESCE(s.email, '')) LIKE :search
+            OR LOWER(COALESCE(s.school_id_number, '')) LIKE :search
+            OR LOWER(CONCAT_WS(' ', u.first_name, u.middle_name, u.last_name)) LIKE :search
+            OR LOWER(CONCAT_WS(' ', u.first_name, u.last_name)) LIKE :search
+            OR LOWER(CONCAT_WS(' ', u.last_name, u.first_name, u.middle_name)) LIKE :search
+            OR LOWER(CONCAT(COALESCE(u.last_name, ''), ', ', COALESCE(u.first_name, ''), ' ', COALESCE(u.middle_name, ''))) LIKE :search
+        )";
+        $params['search'] = '%' . strtolower(preg_replace('/\s+/', ' ', $search_query)) . '%';
     }
     if (!empty($filter_role)) {
         $whereClauses[] = "u.role = :role";
