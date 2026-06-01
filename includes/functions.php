@@ -111,6 +111,122 @@ if (!function_exists('getCurrentStudentId')) {
     }
 }
 
+if (!function_exists('getAcademicProgramOptions')) {
+    function getAcademicProgramOptions(): array
+    {
+        return ['AB-THEO', 'BEED', 'BSED- ENGLISH', 'BSED-MATH', 'BSIT'];
+    }
+}
+
+if (!function_exists('normalizeAcademicProgram')) {
+    function normalizeAcademicProgram(?string $program): ?string
+    {
+        $program = trim((string) $program);
+        if ($program === '') {
+            return null;
+        }
+
+        $normalizedKey = strtoupper(preg_replace('/\s+/', ' ', str_replace('_', '-', $program)));
+        $map = [
+            'BSED-MATH' => 'BSED-MATH',
+            'BSED - MATH' => 'BSED-MATH',
+            'BSED- MATH' => 'BSED-MATH',
+            'BSED -MATH' => 'BSED-MATH',
+            'BSED ENGLISH' => 'BSED- ENGLISH',
+            'BSED-ENGLISH' => 'BSED- ENGLISH',
+            'BSED - ENGLISH' => 'BSED- ENGLISH',
+            'BSED- ENGLISH' => 'BSED- ENGLISH',
+        ];
+
+        return $map[$normalizedKey] ?? $program;
+    }
+}
+
+if (!function_exists('getAcademicYearLevelOptions')) {
+    function getAcademicYearLevelOptions(): array
+    {
+        return ['1st Year', '2nd Year', '3rd Year', '4th Year'];
+    }
+}
+
+if (!function_exists('buildYearProgram')) {
+    function buildYearProgram(?string $program, ?string $yearLevel): ?string
+    {
+        $program = normalizeAcademicProgram($program);
+        $yearLevel = trim((string) $yearLevel);
+
+        return ($program !== null && $yearLevel !== '') ? $yearLevel . ' - ' . $program : null;
+    }
+}
+
+if (!function_exists('getStudentAcademicProfile')) {
+    function getStudentAcademicProfile(PDO $pdo, int $studentId): array
+    {
+        if ($studentId <= 0) {
+            return ['program' => null, 'year_level' => null];
+        }
+
+        $stmt = $pdo->prepare("SELECT program, year_level FROM students WHERE id = ? LIMIT 1");
+        $stmt->execute([$studentId]);
+        $profile = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        return [
+            'program' => $profile['program'] ?? null,
+            'year_level' => $profile['year_level'] ?? null,
+        ];
+    }
+}
+
+if (!function_exists('syncStudentAcademicProfile')) {
+    function syncStudentAcademicProfile(PDO $pdo, int $studentId, ?string $program, ?string $yearLevel): void
+    {
+        if ($studentId <= 0) {
+            return;
+        }
+
+        $program = normalizeAcademicProgram($program) ?? '';
+        $yearLevel = trim((string) $yearLevel);
+
+        if ($program === '' && $yearLevel === '') {
+            return;
+        }
+
+        $stmt = $pdo->prepare("
+            UPDATE students
+            SET
+                program = COALESCE(NULLIF(?, ''), program),
+                year_level = COALESCE(NULLIF(?, ''), year_level),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ");
+        $stmt->execute([$program, $yearLevel, $studentId]);
+    }
+}
+
+if (!function_exists('resolveStudentAcademicField')) {
+    function resolveStudentAcademicField(array $row, string $field): string
+    {
+        $studentKey = 'student_' . $field;
+        $studentValue = trim((string) ($row[$studentKey] ?? ''));
+        if ($studentValue !== '') {
+            return $field === 'program' ? (normalizeAcademicProgram($studentValue) ?? '') : $studentValue;
+        }
+
+        $value = trim((string) ($row[$field] ?? ''));
+        if ($value !== '') {
+            return $field === 'program' ? (normalizeAcademicProgram($value) ?? '') : $value;
+        }
+
+        $yearProgram = trim((string) ($row['year_program'] ?? ''));
+        if ($yearProgram !== '' && strpos($yearProgram, ' - ') !== false) {
+            [$yearLevel, $program] = array_map('trim', explode(' - ', $yearProgram, 2));
+            return $field === 'year_level' ? $yearLevel : (normalizeAcademicProgram($program) ?? '');
+        }
+
+        return $yearProgram;
+    }
+}
+
 if (!function_exists('getScholarshipCapacitySummary')) {
     /**
      * Returns the current scholar counts for a scholarship based on the latest

@@ -269,7 +269,16 @@ if (!function_exists('dbAddColumnIfMissing')) {
         $tableSql = dbQuoteIdentifier($tableName);
         $columnSql = dbQuoteIdentifier($columnName);
         $definition = dbIsPgsql($pdo) ? ($pgsqlDefinition ?? $mysqlDefinition) : $mysqlDefinition;
-        $pdo->exec("ALTER TABLE {$tableSql} ADD COLUMN {$columnSql} {$definition}");
+        try {
+            $pdo->exec("ALTER TABLE {$tableSql} ADD COLUMN {$columnSql} {$definition}");
+        } catch (PDOException $e) {
+            $sqlState = (string) $e->getCode();
+            if (in_array($sqlState, ['42701', '42S21'], true)) {
+                return;
+            }
+
+            throw $e;
+        }
     }
 }
 
@@ -606,8 +615,94 @@ if (!function_exists('dbEnsureUserStudentSyncSchema')) {
         dbAddColumnIfMissing($pdo, 'students', 'email', 'VARCHAR(255) NULL DEFAULT NULL');
         dbAddColumnIfMissing($pdo, 'students', 'phone', 'VARCHAR(50) NULL DEFAULT NULL');
         dbAddColumnIfMissing($pdo, 'students', 'date_of_birth', 'DATE NULL DEFAULT NULL');
+        dbAddColumnIfMissing($pdo, 'students', 'program', 'VARCHAR(100) NULL DEFAULT NULL');
+        dbAddColumnIfMissing($pdo, 'students', 'year_level', 'VARCHAR(50) NULL DEFAULT NULL');
         dbAddColumnIfMissing($pdo, 'students', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
         dbEnsureStudentIndexes($pdo);
+    }
+}
+
+if (!function_exists('dbEnsureStudentAcademicSchema')) {
+    function dbEnsureStudentAcademicSchema(PDO $pdo): void
+    {
+        dbAddColumnIfMissing($pdo, 'students', 'program', 'VARCHAR(100) NULL DEFAULT NULL');
+        dbAddColumnIfMissing($pdo, 'students', 'year_level', 'VARCHAR(50) NULL DEFAULT NULL');
+
+        dbNormalizeAcademicProgramData($pdo);
+
+        $pdo->exec("
+            UPDATE students st
+            SET program = (
+                SELECT a.program
+                FROM applications a
+                WHERE a.student_id = st.id
+                  AND a.program IS NOT NULL
+                  AND a.program <> ''
+                ORDER BY a.id DESC
+                LIMIT 1
+            )
+            WHERE (st.program IS NULL OR st.program = '')
+              AND EXISTS (
+                SELECT 1
+                FROM applications a
+                WHERE a.student_id = st.id
+                  AND a.program IS NOT NULL
+                  AND a.program <> ''
+              )
+        ");
+
+        $pdo->exec("
+            UPDATE students st
+            SET year_level = (
+                SELECT a.year_level
+                FROM applications a
+                WHERE a.student_id = st.id
+                  AND a.year_level IS NOT NULL
+                  AND a.year_level <> ''
+                ORDER BY a.id DESC
+                LIMIT 1
+            )
+            WHERE (st.year_level IS NULL OR st.year_level = '')
+              AND EXISTS (
+                SELECT 1
+                FROM applications a
+                WHERE a.student_id = st.id
+                  AND a.year_level IS NOT NULL
+                  AND a.year_level <> ''
+              )
+        ");
+    }
+}
+
+if (!function_exists('dbNormalizeAcademicProgramData')) {
+    function dbNormalizeAcademicProgramData(PDO $pdo): void
+    {
+        foreach (['students', 'applications'] as $table) {
+            if (!dbTableExists($pdo, $table) || !dbColumnExists($pdo, $table, 'program')) {
+                continue;
+            }
+
+            $tableSql = dbQuoteIdentifier($table);
+            $pdo->exec("UPDATE {$tableSql} SET program = 'BSED-MATH' WHERE program IN ('BSED_MATH', 'BSED - MATH', 'BSED- MATH', 'BSED -MATH')");
+            $pdo->exec("UPDATE {$tableSql} SET program = 'BSED- ENGLISH' WHERE program IN ('BSED_ENGLISH', 'BSED ENGLISH', 'BSED-ENGLISH', 'BSED - ENGLISH')");
+        }
+
+        if (dbTableExists($pdo, 'applications') && dbColumnExists($pdo, 'applications', 'year_program')) {
+            $pdo->exec("
+                UPDATE applications
+                SET year_program = CONCAT(year_level, ' - ', program)
+                WHERE program IS NOT NULL
+                  AND program <> ''
+                  AND year_level IS NOT NULL
+                  AND year_level <> ''
+                  AND (
+                    year_program IS NULL
+                    OR year_program = ''
+                    OR year_program LIKE '%BSED_MATH%'
+                    OR year_program LIKE '%BSED_ENGLISH%'
+                  )
+            ");
+        }
     }
 }
 

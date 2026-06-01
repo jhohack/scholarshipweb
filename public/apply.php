@@ -40,6 +40,8 @@ require_once $base_path . '/includes/functions.php';
 
 // --- Database Migration: Keep application/form schema aligned across drivers ---
 try {
+    dbEnsureUserStudentSyncSchema($pdo);
+    dbEnsureStudentAcademicSchema($pdo);
     dbEnsureApplicationsSchema($pdo);
     dbEnsureFormsSchema($pdo);
     dbEnsureExamSchema($pdo);
@@ -363,6 +365,8 @@ try {
 // --- Fetch Student Data for Pre-filling Form ---
 $student_data = [];
 $user_details = [];
+$academic_program_options = getAcademicProgramOptions();
+$academic_year_level_options = getAcademicYearLevelOptions();
 if (empty($errors)) {
     try {
         // Fetch from students table first
@@ -389,8 +393,8 @@ if (empty($errors)) {
 // Use $can_renew to render renewal form; re-check at submission time with $is_renewing.
 
 $selected_student_status = $_POST['student_status'] ?? '';
-$selected_year_level = $_POST['year_level'] ?? '';
-$selected_program = trim($_POST['program'] ?? '');
+$selected_year_level = $_POST['year_level'] ?? ($student_data['year_level'] ?? '');
+$selected_program = normalizeAcademicProgram($_POST['program'] ?? ($student_data['program'] ?? '')) ?? '';
 $selected_school_id = $_POST['school_id'] ?? ($student_data['school_id_number'] ?? '');
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
@@ -405,7 +409,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $birthdate = trim($_POST['birthdate'] ?? '');
     $selected_student_status = trim($_POST['student_status'] ?? '');
     $selected_year_level = trim($_POST['year_level'] ?? '');
-    $selected_program = trim($_POST['program'] ?? '');
+    $selected_program = normalizeAcademicProgram($_POST['program'] ?? '') ?? '';
     $selected_school_id = trim($_POST['school_id'] ?? ($student_data['school_id_number'] ?? ''));
     $normalizeUploadedFiles = static function ($file_input) {
         if (empty($file_input) || !isset($file_input['name'])) {
@@ -480,7 +484,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Renewal specific fields
     $year_level = ($selected_year_level !== '') ? $selected_year_level : null;
     $program = ($selected_program !== '') ? $selected_program : null;
-    $year_program = ($year_level && $program) ? $year_level . ' - ' . $program : null;
+    $year_program = buildYearProgram($program, $year_level);
 
     $units_enrolled_raw = trim((string) ($_POST['units_enrolled'] ?? ''));
     $gwa_raw = trim((string) ($_POST['gwa'] ?? ''));
@@ -541,6 +545,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         email = ?,
                         phone = ?,
                         date_of_birth = ?,
+                        program = COALESCE(NULLIF(?, ''), program),
+                        year_level = COALESCE(NULLIF(?, ''), year_level),
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?"
                 );
@@ -550,6 +556,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     $user_data_sync['email'],
                     $user_data_sync['contact_number'],
                     $user_data_sync['birthdate'],
+                    (string) $program,
+                    (string) $year_level,
                     $student_id
                 ]);
             }
@@ -576,14 +584,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 
                 $student_id = dbExecuteInsert(
                     $pdo,
-                    "INSERT INTO students (user_id, student_name, school_id_number, email, phone, date_of_birth) VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO students (user_id, student_name, school_id_number, email, phone, date_of_birth, program, year_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     [
                         $user_id,
                         $full_name,
                         $school_id_for_student,
                         $user_data['email'],
                         $user_data['contact_number'],
-                        $user_data['birthdate']
+                        $user_data['birthdate'],
+                        $program,
+                        $year_level
                     ]
                 );
 
@@ -798,6 +808,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         [$student_id, $scholarship_id, $initial_status, $applicant_type_insert, $student_status_insert, $year_program, $program, $year_level, $units_enrolled, $gwa]
                     );
                 }
+
+                syncStudentAcademicProfile($pdo, (int) $student_id, $program, $year_level);
 
                 // If applying as a New Applicant (e.g., after being dropped), update the user's student_type
                 if ($applicant_type_insert === 'New') {
@@ -1084,21 +1096,18 @@ $page_title = 'Apply for Scholarship';
                                         <label for="year_level_renewal" class="form-label fw-bold">Year Level <span class="text-danger">*</span></label>
                                         <select class="form-select" id="year_level_renewal" name="year_level" required>
                                             <option value="" <?php echo $selected_year_level === '' ? 'selected' : ''; ?> disabled>Select Year</option>
-                                            <option value="1st Year" <?php echo $selected_year_level === '1st Year' ? 'selected' : ''; ?>>1st Year</option>
-                                            <option value="2nd Year" <?php echo $selected_year_level === '2nd Year' ? 'selected' : ''; ?>>2nd Year</option>
-                                            <option value="3rd Year" <?php echo $selected_year_level === '3rd Year' ? 'selected' : ''; ?>>3rd Year</option>
-                                            <option value="4th Year" <?php echo $selected_year_level === '4th Year' ? 'selected' : ''; ?>>4th Year</option>
+                                            <?php foreach ($academic_year_level_options as $yearOption): ?>
+                                                <option value="<?php echo htmlspecialchars($yearOption); ?>" <?php echo $selected_year_level === $yearOption ? 'selected' : ''; ?>><?php echo htmlspecialchars($yearOption); ?></option>
+                                            <?php endforeach; ?>
                                         </select>
                                     </div>
                                     <div class="col-md-6">
                                         <label for="program_renewal" class="form-label fw-bold">Program <span class="text-danger">*</span></label>
                                         <select class="form-select" id="program_renewal" name="program" required>
                                             <option value="" <?php echo $selected_program === '' ? 'selected' : ''; ?> disabled>Select Program</option>
-                                            <option value="BSIT" <?php echo $selected_program === 'BSIT' ? 'selected' : ''; ?>>BSIT</option>
-                                            <option value="AB-THEO" <?php echo $selected_program === 'AB-THEO' ? 'selected' : ''; ?>>AB-THEO</option>
-                                            <option value="BSED- ENGLISH" <?php echo $selected_program === 'BSED- ENGLISH' ? 'selected' : ''; ?>>BSED- ENGLISH</option>
-                                            <option value="BSED-MATH" <?php echo $selected_program === 'BSED-MATH' ? 'selected' : ''; ?>>BSED-MATH</option>
-                                            <option value="BEED" <?php echo $selected_program === 'BEED' ? 'selected' : ''; ?>>BEED</option>
+                                            <?php foreach ($academic_program_options as $programOption): ?>
+                                                <option value="<?php echo htmlspecialchars($programOption); ?>" <?php echo $selected_program === $programOption ? 'selected' : ''; ?>><?php echo htmlspecialchars($programOption); ?></option>
+                                            <?php endforeach; ?>
                                         </select>
                                     </div>
                                 </div>
@@ -1298,21 +1307,18 @@ $page_title = 'Apply for Scholarship';
                                             <label class="form-label">Year Level</label>
                                             <select class="form-select" name="year_level" data-required-for="Continuing Student">
                                                 <option value="">Select Year</option>
-                                                <option value="1st Year" <?php echo $selected_year_level === '1st Year' ? 'selected' : ''; ?>>1st Year</option>
-                                                <option value="2nd Year" <?php echo $selected_year_level === '2nd Year' ? 'selected' : ''; ?>>2nd Year</option>
-                                                <option value="3rd Year" <?php echo $selected_year_level === '3rd Year' ? 'selected' : ''; ?>>3rd Year</option>
-                                                <option value="4th Year" <?php echo $selected_year_level === '4th Year' ? 'selected' : ''; ?>>4th Year</option>
+                                                <?php foreach ($academic_year_level_options as $yearOption): ?>
+                                                    <option value="<?php echo htmlspecialchars($yearOption); ?>" <?php echo $selected_year_level === $yearOption ? 'selected' : ''; ?>><?php echo htmlspecialchars($yearOption); ?></option>
+                                                <?php endforeach; ?>
                                             </select>
                                         </div>
                                         <div class="col-md-4">
                                             <label class="form-label">Program</label>
                                             <select class="form-select" name="program" data-required-for="Continuing Student">
                                                 <option value="">Select Program</option>
-                                                <option value="BSIT" <?php echo $selected_program === 'BSIT' ? 'selected' : ''; ?>>BSIT</option>
-                                                <option value="AB-THEO" <?php echo $selected_program === 'AB-THEO' ? 'selected' : ''; ?>>AB-THEO</option>
-                                                <option value="BSED- ENGLISH" <?php echo $selected_program === 'BSED- ENGLISH' ? 'selected' : ''; ?>>BSED- ENGLISH</option>
-                                                <option value="BSED-MATH" <?php echo $selected_program === 'BSED-MATH' ? 'selected' : ''; ?>>BSED-MATH</option>
-                                                <option value="BEED" <?php echo $selected_program === 'BEED' ? 'selected' : ''; ?>>BEED</option>
+                                                <?php foreach ($academic_program_options as $programOption): ?>
+                                                    <option value="<?php echo htmlspecialchars($programOption); ?>" <?php echo $selected_program === $programOption ? 'selected' : ''; ?>><?php echo htmlspecialchars($programOption); ?></option>
+                                                <?php endforeach; ?>
                                             </select>
                                         </div>
                                     </div>

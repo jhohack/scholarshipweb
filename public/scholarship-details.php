@@ -108,7 +108,7 @@ if ($is_renewal_applicant) {
         .details-header {
             background:
                 linear-gradient(135deg, rgba(0, 58, 112, 0.84), rgba(13, 110, 253, 0.88)),
-                url('assets/images/hero-illustration.svg') no-repeat center center;
+                url('assets/images/scholarship-students-library.jpg') no-repeat center center;
             background-size: cover;
             color: white;
             padding: 4rem 0;

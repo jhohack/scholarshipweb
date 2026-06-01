@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS students (
     phone VARCHAR(20),
     date_of_birth DATE,
     address TEXT,
+    program VARCHAR(100),
+    year_level VARCHAR(50),
     student_type VARCHAR(20) DEFAULT 'new',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP

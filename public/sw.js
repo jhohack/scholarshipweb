@@ -1,10 +1,10 @@
-const CACHE_NAME = 'dvc-portal-v2';
+const CACHE_NAME = 'dvc-portal-v3';
 const APP_SHELL = [
   './',
   './index.php',
   './assets/css/style.css',
   './assets/js/app.js',
-  './assets/images/hero-illustration.svg',
+  './assets/images/scholarship-students-library.jpg',
   '../images/brand-mark.svg',
   './manifest.json'
 ];

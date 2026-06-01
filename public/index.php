@@ -311,7 +311,7 @@ $page_title = 'DVC Scholarship Hub';
             <div class="container">
                 <div class="row align-items-center g-5">
                     <div class="col-lg-6" data-aos="fade-right">
-                        <img src="assets/images/hero-illustration.svg" class="img-fluid rounded shadow-lg" alt="Students studying together" loading="lazy" decoding="async">
+                        <img src="assets/images/scholarship-students-library.jpg" class="img-fluid rounded shadow-lg value-prop-image" alt="Students studying together in a library" loading="lazy" decoding="async">
                     </div>
                     <div class="col-lg-6" data-aos="fade-left" data-aos-delay="100">
                         <h2 class="fw-bold mb-4">Your Direct Path to Funding</h2>

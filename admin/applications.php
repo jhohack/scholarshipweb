@@ -40,8 +40,8 @@ function getApplicantStatusLabel(array $application): string {
 }
 
 function formatAcademicDisplay(array $application, string $field): string {
-    $value = $application[$field] ?? null;
     if ($field === 'gwa') {
+        $value = $application[$field] ?? null;
         if (isAcademicPlaceholderValue($value)) {
             return '-';
         }
@@ -49,6 +49,7 @@ function formatAcademicDisplay(array $application, string $field): string {
         return is_numeric($value) ? convertGwaToPercentage($value) : (string) $value;
     }
 
+    $value = resolveStudentAcademicField($application, $field);
     if (isAcademicPlaceholderValue($value)) {
         return '-';
     }
@@ -111,12 +112,14 @@ function buildApplicationsReturnUrl(array $params = []): string
 }
 
 dbEnsureNotificationsTable($pdo);
+dbEnsureUserStudentSyncSchema($pdo);
+dbEnsureStudentAcademicSchema($pdo);
 dbEnsureApplicationsSchema($pdo);
 dbEnsureDocumentReviewSchema($pdo);
 
 // Sync Data: Automatically parse year_program into new columns if they are empty
 // This ensures existing data is split correctly based on specific programs and year levels
-$known_programs = ['AB-THEO', 'BEED', 'BSIT', 'BSED_ENGLISH', 'BSED_MATH', 'BSED- ENGLISH'];
+$known_programs = getAcademicProgramOptions();
 foreach ($known_programs as $prog) {
     $stmt = $pdo->prepare("UPDATE applications SET program = ? WHERE year_program LIKE ? AND (program IS NULL OR program = '')");
     $stmt->execute([$prog, "%$prog%"]);
@@ -184,6 +187,7 @@ if ($action === 'get_details' && isset($_GET['app_id'])) {
         // 1. Application & Student Info
         $stmt = $pdo->prepare("
             SELECT a.*, s.student_name, s.school_id_number, s.email, s.phone, s.date_of_birth,
+                   s.program as student_program, s.year_level as student_year_level,
                    sch.name as scholarship_name, sch.amount as base_amount, sch.amount_type
             FROM applications a
             JOIN students s ON a.student_id = s.id
@@ -196,6 +200,11 @@ if ($action === 'get_details' && isset($_GET['app_id'])) {
         if (!$app) {
             respondWithJson(['error' => 'Application not found'], 404);
         }
+
+        $resolvedProgram = resolveStudentAcademicField($app, 'program');
+        $resolvedYearLevel = resolveStudentAcademicField($app, 'year_level');
+        $app['program'] = $resolvedProgram !== '' ? $resolvedProgram : ($app['program'] ?? null);
+        $app['year_level'] = $resolvedYearLevel !== '' ? $resolvedYearLevel : ($app['year_level'] ?? null);
 
         // 2. Form Responses
         $stmt = $pdo->prepare("
@@ -460,15 +469,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_details'])) {
         $units = ($_POST['units_enrolled'] ?? '') !== '' ? $_POST['units_enrolled'] : null;
         $gwa = ($_POST['gwa'] ?? '') !== '' ? $_POST['gwa'] : null;
         
-        $stmt = $pdo->prepare("UPDATE applications SET program = ?, year_level = ?, units_enrolled = ?, gwa = ?, student_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+        $normalized_prog = normalizeAcademicProgram($prog);
+        $normalized_yl = trim($yl) !== '' ? trim($yl) : null;
+        $year_program = buildYearProgram($normalized_prog, $normalized_yl);
+
+        $stmt = $pdo->prepare("UPDATE applications SET program = ?, year_level = ?, year_program = ?, units_enrolled = ?, gwa = ?, student_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
         $stmt->execute([
-            trim($prog) !== '' ? trim($prog) : null,
-            trim($yl) !== '' ? trim($yl) : null,
+            $normalized_prog,
+            $normalized_yl,
+            $year_program,
             $units,
             $gwa,
             $student_status !== '' ? $student_status : null,
             $app_id
         ]);
+        syncStudentAcademicProfile($pdo, (int) $student_id, $normalized_prog, $normalized_yl);
 
         // --- Auto-Recalculate Amount/Percentage if Logic Applies ---
         // Fetch necessary info to check logic
@@ -713,7 +728,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['export_csv'])) {
 
     // Fetch ALL data for the scholarship (ignoring selection)
     $stmt = $pdo->prepare("
-        SELECT s.student_name, s.school_id_number, s.email, s.phone,
+        SELECT s.student_name, s.school_id_number, s.email, s.phone, s.program as student_program, s.year_level as student_year_level,
                sch.name as scholarship_name, a.applicant_type, a.student_status, a.program, a.year_level,
                a.status, a.scholarship_percentage, a.scholarship_amount, a.submitted_at
         FROM applications a
@@ -758,7 +773,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['export_doc'])) {
 
     // Fetch ALL data for the scholarship (ignoring selection)
     $stmt = $pdo->prepare("
-        SELECT s.student_name, s.school_id_number, s.email, s.phone,
+        SELECT s.student_name, s.school_id_number, s.email, s.phone, s.program as student_program, s.year_level as student_year_level,
                sch.name as scholarship_name, a.applicant_type, a.student_status, a.program, a.year_level,
                a.status, a.scholarship_percentage, a.scholarship_amount, a.submitted_at
         FROM applications a
@@ -952,7 +967,7 @@ if ($scholarship_id) {
         $status_filter = $_GET['status_filter'] ?? 'pending';
         $search = $_GET['search'] ?? '';
         $start_date = $_GET['start_date'] ?? '';
-        $program_filter = $_GET['program_filter'] ?? '';
+        $program_filter = normalizeAcademicProgram($_GET['program_filter'] ?? '') ?? '';
         $year_level_filter = $_GET['year_level_filter'] ?? '';
         $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
         $limit = 20;
@@ -991,12 +1006,12 @@ if ($scholarship_id) {
         }
 
         if (!empty($program_filter)) {
-            $base_sql .= " AND a.program = ?"; 
+            $base_sql .= " AND COALESCE(NULLIF(s.program, ''), a.program) = ?";
             $params[] = $program_filter;
         }
 
         if (!empty($year_level_filter)) {
-            $base_sql .= " AND a.year_level = ?";
+            $base_sql .= " AND COALESCE(NULLIF(s.year_level, ''), a.year_level) = ?";
             $params[] = $year_level_filter;
         }
         
@@ -1012,7 +1027,7 @@ if ($scholarship_id) {
         $total_pages = ceil($total_rows / $limit);
 
         // Fetch Data
-        $sql = "SELECT a.*, s.student_name, s.email, s.school_id_number, u.profile_picture_path, u.first_name, u.middle_name, u.last_name " . $base_sql;
+        $sql = "SELECT a.*, s.student_name, s.email, s.school_id_number, s.program as student_program, s.year_level as student_year_level, u.profile_picture_path, u.first_name, u.middle_name, u.last_name " . $base_sql;
         $sql .= " 
             ORDER BY 
             CASE 
@@ -1165,19 +1180,33 @@ if ($scholarship_id) {
             exit;
         }
 
-        // Define the complete list of programs and year levels
-        $distinct_programs = ['AB-THEO', 'BSIT', 'BEED', 'BSED_MATH', 'BSED- ENGLISH'];
-        $distinct_year_levels = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
+        // Define the complete list of programs and year levels from the shared academic profile options.
+        $distinct_programs = getAcademicProgramOptions();
+        $distinct_year_levels = getAcademicYearLevelOptions();
 
         // Fetch distinct programs from the new column
-        $prog_stmt = $pdo->prepare("SELECT DISTINCT program FROM applications WHERE scholarship_id = ? AND program IS NOT NULL AND program != ''");
+        $prog_stmt = $pdo->prepare("
+            SELECT DISTINCT COALESCE(NULLIF(s.program, ''), a.program) as program
+            FROM applications a
+            JOIN students s ON a.student_id = s.id
+            WHERE a.scholarship_id = ?
+              AND COALESCE(NULLIF(s.program, ''), a.program) IS NOT NULL
+              AND COALESCE(NULLIF(s.program, ''), a.program) != ''
+        ");
         $prog_stmt->execute([$scholarship_id]);
         $db_programs = $prog_stmt->fetchAll(PDO::FETCH_COLUMN);
         $distinct_programs = array_unique(array_merge($distinct_programs, $db_programs));
         sort($distinct_programs);
 
         // Fetch distinct year levels from the new column
-        $yl_stmt = $pdo->prepare("SELECT DISTINCT year_level FROM applications WHERE scholarship_id = ? AND year_level IS NOT NULL AND year_level != ''");
+        $yl_stmt = $pdo->prepare("
+            SELECT DISTINCT COALESCE(NULLIF(s.year_level, ''), a.year_level) as year_level
+            FROM applications a
+            JOIN students s ON a.student_id = s.id
+            WHERE a.scholarship_id = ?
+              AND COALESCE(NULLIF(s.year_level, ''), a.year_level) IS NOT NULL
+              AND COALESCE(NULLIF(s.year_level, ''), a.year_level) != ''
+        ");
         $yl_stmt->execute([$scholarship_id]);
         $db_year_levels = $yl_stmt->fetchAll(PDO::FETCH_COLUMN);
         $distinct_year_levels = array_unique(array_merge($distinct_year_levels, $db_year_levels));

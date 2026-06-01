@@ -9,6 +9,14 @@ require_once $base_path . '/includes/functions.php';
 
 checkSessionTimeout();
 
+try {
+    dbEnsureUserStudentSyncSchema($pdo);
+    dbEnsureStudentAcademicSchema($pdo);
+    dbEnsureApplicationsSchema($pdo);
+} catch (PDOException $e) {
+    error_log("Renewal schema sync error: " . $e->getMessage());
+}
+
 // --- Authentication & Authorization ---
 if (!isStudent()) {
     header("Location: ../public/login.php");
@@ -129,6 +137,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && empty($errors)) {
                 // 2. Insert the uploaded document, linking it to the new application
                 $doc_stmt = $pdo->prepare("INSERT INTO documents (user_id, application_id, file_name, file_path) VALUES (?, ?, ?, ?)");
                 $doc_stmt->execute([$user_id, $new_application_id, $uploaded_file['name'], $uploaded_file['path']]);
+
+                $academic_stmt = $pdo->prepare("SELECT student_id, program, year_level FROM applications WHERE id = ?");
+                $academic_stmt->execute([$new_application_id]);
+                $academic_row = $academic_stmt->fetch(PDO::FETCH_ASSOC);
+                if ($academic_row) {
+                    syncStudentAcademicProfile($pdo, (int) $academic_row['student_id'], $academic_row['program'] ?? null, $academic_row['year_level'] ?? null);
+                }
 
                 $pdo->commit();
                 $success = true;
