@@ -1356,8 +1356,7 @@ $page_title = 'Apply for Scholarship';
                                     <small class="text-justify">
                                         <strong>Required Documents:</strong><br>
                                         <?php echo !empty($scholarship['application_requirements']) ? nl2br(htmlspecialchars($scholarship['application_requirements'])) : 'The list of required documents and items for the application is not yet available.'; ?><br>
-                                        <em>Please upload all documents as PDF files.</em>
-                                    <br><em class="text-danger">The attached picture should be scanned, not a picture attached to a Word document and converted to PDF.</em></small>
+                                        <em>Please upload all documents as PDF files.</em></small>
                                 </div>
                                 <div class="mb-4">
                                     <label for="documents_new" class="form-label fw-bold">Upload Documents</label>
