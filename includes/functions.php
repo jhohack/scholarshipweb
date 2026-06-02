@@ -787,9 +787,9 @@ function formatApplicationStatus($db_status) {
 /**
  * Checks if the session has expired due to inactivity.
  * 
- * @param int $timeout_duration Duration in seconds (default 30 mins).
+ * @param int $timeout_duration Duration in seconds (default 2 hours).
  */
-function checkSessionTimeout($timeout_duration = 3000) {
+function checkSessionTimeout($timeout_duration = 7200) {
     if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeout_duration) {
         // Determine redirect URL based on context (Admin vs Public)
         $redirect_url = BASE_URL . "/public/login.php?timeout=1";

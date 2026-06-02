@@ -1355,11 +1355,7 @@ $page_title = 'Apply for Scholarship';
                                 <div class="alert alert-info">
                                     <small class="text-justify">
                                         <strong>Required Documents:</strong><br>
-                                        1. Certificate of Registration / Enrollment Form<br>
-                                        2. Report Card / Copy of Grades<br>
-                                        3. Certificate of Good Moral Character<br>
-                                        4. Income Tax Return of Parents or Certificate of Indigency<br>
-                                        5. Birth Certificate (PSA)<br>
+                                        <?php echo !empty($scholarship['application_requirements']) ? nl2br(htmlspecialchars($scholarship['application_requirements'])) : 'The list of required documents and items for the application is not yet available.'; ?><br>
                                         <em>Please upload all documents as PDF files.</em>
                                     <br><em class="text-danger">The attached picture should be scanned, not a picture attached to a Word document and converted to PDF.</em></small>
                                 </div>

@@ -138,7 +138,7 @@ $scholarship_id = filter_input(INPUT_GET, 'scholarship_id', FILTER_SANITIZE_NUMB
 $action = $_GET['action'] ?? 'list';
 $isJsonRequest = isApplicationsJsonRequest();
 
-if ($isJsonRequest && isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > 3000) {
+if ($isJsonRequest && isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > 7200) {
     session_unset();
     session_destroy();
     respondWithJson([
