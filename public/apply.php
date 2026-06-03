@@ -396,6 +396,7 @@ $selected_student_status = $_POST['student_status'] ?? '';
 $selected_year_level = $_POST['year_level'] ?? ($student_data['year_level'] ?? '');
 $selected_program = normalizeAcademicProgram($_POST['program'] ?? ($student_data['program'] ?? '')) ?? '';
 $selected_school_id = $_POST['school_id'] ?? ($student_data['school_id_number'] ?? '');
+$supabase_direct_upload_enabled = appUsesSupabaseUploads() && supabaseStorageConfigured();
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $posted_scholarship_id = filter_input(INPUT_POST, 'scholarship_id', FILTER_SANITIZE_NUMBER_INT);
@@ -448,6 +449,55 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     };
     $supporting_document_files = $normalizeUploadedFiles($supporting_documents);
     $gwa_document_files = $normalizeUploadedFiles($gwa_document);
+    $supabase_uploaded_files = [];
+    $supabase_uploaded_raw = trim((string) ($_POST['supabase_uploaded_documents'] ?? ''));
+    if ($supabase_uploaded_raw !== '') {
+        $decoded_uploaded = json_decode($supabase_uploaded_raw, true);
+        if (!is_array($decoded_uploaded)) {
+            $errors[] = 'Uploaded document references were invalid. Please refresh and try again.';
+        } else {
+            $allowed_supabase_prefix = 'applications/user_' . (int) $user_id . '/';
+            foreach ($decoded_uploaded as $uploaded_ref) {
+                if (!is_array($uploaded_ref)) {
+                    continue;
+                }
+
+                $documentPath = trim((string) ($uploaded_ref['document_path'] ?? ''));
+                $storagePath = strpos($documentPath, 'supabase:') === 0 ? substr($documentPath, 9) : '';
+                $inputName = trim((string) ($uploaded_ref['input_name'] ?? ''));
+                $fileName = storageSanitizeFilename((string) ($uploaded_ref['name'] ?? $uploaded_ref['original_name'] ?? 'document.pdf'));
+
+                if ($documentPath === '' || $storagePath === '' || strpos($storagePath, $allowed_supabase_prefix) !== 0) {
+                    $errors[] = 'One uploaded document reference did not match your account. Please upload the files again.';
+                    continue;
+                }
+
+                if (!in_array($inputName, ['supporting_documents', 'gwa_document'], true)) {
+                    $errors[] = 'One uploaded document reference had an invalid document type.';
+                    continue;
+                }
+
+                if (!storedFileExists($pdo, $documentPath, $base_path)) {
+                    $errors[] = "Uploaded file '{$fileName}' was not found in Supabase Storage. Please upload it again.";
+                    continue;
+                }
+
+                $supabase_uploaded_files[] = [
+                    'name' => $fileName,
+                    'path' => $documentPath,
+                    'input_name' => $inputName,
+                ];
+            }
+        }
+    }
+    $hasSupabaseUploadedFile = static function (string $inputName) use ($supabase_uploaded_files): bool {
+        foreach ($supabase_uploaded_files as $file) {
+            if (($file['input_name'] ?? '') === $inputName) {
+                return true;
+            }
+        }
+        return false;
+    };
 
     // Update user info if provided. This happens before the main application logic.
     if (!empty($contact_number) || !empty($birthdate) || (array_key_exists('school_id', $_POST) && $selected_school_id !== '')) {
@@ -659,7 +709,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             if (empty($year_program) || empty($units_enrolled) || empty($gwa)) {
                 $errors[] = "Year & Program, Units Enrolled, and GWA are required for Renewal Applicants.";
             }
-            if (!$hasUploadedFile($gwa_document)) {
+            if (!$hasUploadedFile($gwa_document) && !$hasSupabaseUploadedFile('gwa_document')) {
                 $errors[] = "A scanned copy of your GWA must be uploaded for renewal.";
             }
         }
@@ -682,29 +732,33 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             if (($dynamic_responses['is_pwd'] ?? 'No') === 'Yes' && empty(trim($dynamic_responses['pwd_details'] ?? ''))) {
                 $errors[] = "Please specify your disability details since you indicated you are a PWD.";
             }
-            if (!$hasUploadedFile($supporting_documents)) {
+            if (!$hasUploadedFile($supporting_documents) && !$hasSupabaseUploadedFile('supporting_documents')) {
                 $errors[] = "Required supporting documents must be uploaded.";
             }
-            if ($is_continuing_student && !$hasUploadedFile($gwa_document)) {
+            if ($is_continuing_student && !$hasUploadedFile($gwa_document) && !$hasSupabaseUploadedFile('gwa_document')) {
                 $errors[] = "A scanned copy of your GWA must be uploaded for Continuing Students.";
             }
         }
 
         // --- Secure File Upload Handling ---
-        $uploaded_files = [];
+        $uploaded_files = $supabase_uploaded_files;
         $allowed_types = ['application/pdf'];
         $max_file_size = appUploadMaxBytes();
-        $supporting_file_count = 0;
-        foreach ($supporting_document_files as $file) {
-            if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE && trim((string)($file['name'] ?? '')) !== '') {
-                $supporting_file_count++;
+        $supporting_file_count = count(array_filter($supabase_uploaded_files, static function ($file) {
+            return ($file['input_name'] ?? '') === 'supporting_documents';
+        }));
+        if ($supporting_file_count === 0) {
+            foreach ($supporting_document_files as $file) {
+                if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE && trim((string)($file['name'] ?? '')) !== '') {
+                    $supporting_file_count++;
+                }
             }
         }
         if ($supporting_file_count > 5) {
             $errors[] = "You can only upload a maximum of 5 supporting documents.";
         }
 
-        foreach ([$supporting_document_files, $gwa_document_files] as $file_group) {
+        foreach (empty($supabase_uploaded_files) ? [$supporting_document_files, $gwa_document_files] : [] as $file_group) {
             foreach ($file_group as $file) {
                 $name = $file['name'] ?? '';
                 if (empty($name)) continue; // Skip empty file inputs
@@ -1053,8 +1107,9 @@ $page_title = 'Apply for Scholarship';
                             </div>
                         <?php endif; ?>
                         
-                        <form action="apply.php?id=<?php echo $scholarship_id; ?>" method="post" enctype="multipart/form-data">
+                        <form action="apply.php?id=<?php echo $scholarship_id; ?>" method="post" enctype="multipart/form-data" id="application-form">
                             <input type="hidden" name="scholarship_id" value="<?php echo $scholarship_id; ?>">
+                            <input type="hidden" name="supabase_uploaded_documents" id="supabase_uploaded_documents" value="">
 
                             <!-- Renewal Applicant Section -->
                             <?php if ($can_renew): ?>
@@ -1365,7 +1420,14 @@ $page_title = 'Apply for Scholarship';
                                         <div class="file-upload-content">
                                             <i class="bi bi-cloud-arrow-up-fill"></i>
                                             <p><strong>Drag & drop files here</strong> or click to browse.</p>
-                                            <small class="text-muted">PDF files only. Max <?php echo htmlspecialchars(appUploadMaxLabel()); ?> per file. Max 5 files.</small>
+                                            <small class="text-muted">
+                                                PDF files only.
+                                                Max <?php echo htmlspecialchars(appUploadMaxLabel()); ?> per file.
+                                                <?php if (!$supabase_direct_upload_enabled): ?>
+                                                    Max 3.8MB total per submission.
+                                                <?php endif; ?>
+                                                Max 5 files.
+                                            </small>
                                         </div>
                                     </div>
                                     <div id="file-list-new" class="mt-3"></div>
@@ -1488,6 +1550,16 @@ $page_title = 'Apply for Scholarship';
     </div>
 
     <script>
+        window.SCHOLARSHIP_UPLOAD_CONFIG = {
+            supabaseDirectUpload: <?php echo $supabase_direct_upload_enabled ? 'true' : 'false'; ?>,
+            signUrl: <?php echo json_encode(rtrim(BASE_URL, '/') . '/api/supabase-upload-sign.php'); ?>,
+            maxFileBytes: <?php echo (int) appUploadMaxBytes(); ?>,
+            maxFileLabel: <?php echo json_encode(appUploadMaxLabel()); ?>,
+            legacyTotalMaxBytes: 3984588,
+            legacyTotalMaxLabel: '3.8MB'
+        };
+    </script>
+    <script>
     function toggleStudentStatusSections() {
         const selectedStatusInput = document.querySelector('input[name="student_status"]:checked');
         const selectedStatus = selectedStatusInput ? selectedStatusInput.value : '';
@@ -1548,7 +1620,7 @@ $page_title = 'Apply for Scholarship';
     });
 
     document.addEventListener('DOMContentLoaded', function() {
-        const form = document.querySelector('form');
+        const form = document.getElementById('application-form') || document.querySelector('form');
         const triggerBtn = document.getElementById('trigger-privacy-modal');
         
         // Initialize modal only if element exists
@@ -1580,11 +1652,139 @@ $page_title = 'Apply for Scholarship';
                 });
             }
 
-            confirmSubmitBtn.addEventListener('click', function() {
+            const resetSubmitButton = function(message) {
+                confirmSubmitBtn.disabled = false;
+                cancelPrivacyBtn.disabled = false;
+                confirmSubmitBtn.innerHTML = 'Submit Application';
+                if (message) {
+                    alert(message);
+                }
+            };
+
+            const collectApplicationFiles = function() {
+                const selectedFiles = [];
+                const supportingInput = document.getElementById('documents_new');
+                if (supportingInput && supportingInput.files) {
+                    Array.from(supportingInput.files).forEach((file, index) => {
+                        selectedFiles.push({ input_name: 'supporting_documents', index, file });
+                    });
+                }
+
+                document.querySelectorAll('input[type="file"][name="gwa_document"]').forEach(input => {
+                    if (input.files && input.files.length > 0) {
+                        selectedFiles.push({ input_name: 'gwa_document', index: 0, file: input.files[0] });
+                    }
+                });
+
+                return selectedFiles;
+            };
+
+            const uploadFilesToSupabase = async function() {
+                const config = window.SCHOLARSHIP_UPLOAD_CONFIG || {};
+                const selectedFiles = collectApplicationFiles();
+                if (selectedFiles.length === 0) {
+                    return [];
+                }
+
+                for (const item of selectedFiles) {
+                    const file = item.file;
+                    if (file.type && file.type !== 'application/pdf') {
+                        throw new Error('Only PDF files can be uploaded.');
+                    }
+                    if (!/\.pdf$/i.test(file.name)) {
+                        throw new Error('Only PDF files can be uploaded.');
+                    }
+                    if (file.size > config.maxFileBytes) {
+                        throw new Error(`"${file.name}" exceeds the ${config.maxFileLabel} upload limit.`);
+                    }
+                }
+
+                if (!config.supabaseDirectUpload) {
+                    const totalBytes = selectedFiles.reduce((sum, item) => sum + item.file.size, 0);
+                    if (totalBytes > config.legacyTotalMaxBytes) {
+                        throw new Error(`Your selected PDFs are too large for one submission. Please keep the total upload size under ${config.legacyTotalMaxLabel} or compress the files before submitting.`);
+                    }
+                    return [];
+                }
+
+                const signResponse = await fetch(config.signUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        files: selectedFiles.map(item => ({
+                            input_name: item.input_name,
+                            index: item.index,
+                            name: item.file.name,
+                            size: item.file.size,
+                            type: item.file.type || 'application/pdf'
+                        }))
+                    })
+                });
+
+                const signData = await signResponse.json().catch(() => null);
+                if (!signResponse.ok || !signData || !signData.success) {
+                    throw new Error(signData?.error || 'Unable to prepare document upload. Please try again.');
+                }
+
+                const uploadedRefs = [];
+                for (const signedFile of signData.files || []) {
+                    const selected = selectedFiles.find(item =>
+                        item.input_name === signedFile.input_name && Number(item.index) === Number(signedFile.index)
+                    );
+                    if (!selected) {
+                        throw new Error('Unable to match one of the selected documents.');
+                    }
+
+                    const body = new FormData();
+                    body.append('cacheControl', '3600');
+                    body.append('', selected.file);
+
+                    const uploadResponse = await fetch(signedFile.signed_url, {
+                        method: 'PUT',
+                        headers: { 'x-upsert': 'false' },
+                        body
+                    });
+
+                    if (!uploadResponse.ok) {
+                        throw new Error(`Failed to upload "${selected.file.name}" to Supabase Storage.`);
+                    }
+
+                    uploadedRefs.push({
+                        input_name: signedFile.input_name,
+                        index: signedFile.index,
+                        name: signedFile.name,
+                        original_name: selected.file.name,
+                        storage_path: signedFile.storage_path,
+                        document_path: signedFile.document_path,
+                        size: selected.file.size,
+                        type: 'application/pdf'
+                    });
+                }
+
+                return uploadedRefs;
+            };
+
+            confirmSubmitBtn.addEventListener('click', async function() {
                 confirmSubmitBtn.disabled = true;
                 cancelPrivacyBtn.disabled = true;
-                confirmSubmitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Submitting...';
-                form.submit();
+                confirmSubmitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Uploading documents...';
+
+                try {
+                    const uploadedRefs = await uploadFilesToSupabase();
+                    const hiddenInput = document.getElementById('supabase_uploaded_documents');
+                    if (hiddenInput && uploadedRefs.length > 0) {
+                        hiddenInput.value = JSON.stringify(uploadedRefs);
+                        document.querySelectorAll('input[type="file"]').forEach(input => {
+                            input.disabled = true;
+                        });
+                    }
+
+                    confirmSubmitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Submitting...';
+                    form.submit();
+                } catch (error) {
+                    resetSubmitButton(error.message || 'Unable to upload documents. Please try again.');
+                }
             });
 
             cancelPrivacyBtn.addEventListener('click', function() {

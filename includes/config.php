@@ -231,6 +231,8 @@ define('DB_CHANNEL_BINDING', $resolvedDbChannelBinding);
 define('DB_PG_OPTIONS', $resolvedDbPgOptions);
 define('SUPABASE_PROJECT_ID', $supabaseProjectId);
 define('SUPABASE_PROJECT_URL', $supabaseProjectUrl);
+define('SUPABASE_SERVICE_ROLE_KEY', env_config('SUPABASE_SERVICE_ROLE_KEY', env_config('SUPABASE_SERVICE_KEY', '')));
+define('SUPABASE_STORAGE_BUCKET', env_config('SUPABASE_STORAGE_BUCKET', 'documents'));
 define('BASE_URL', rtrim(env_config('BASE_URL', $legacyBaseUrl), '/'));
 
 define('GOOGLE_CLIENT_ID', env_config('GOOGLE_CLIENT_ID', '127649949023-se8oo6060ho0amkk852h2lk0atms23vj.apps.googleusercontent.com'));

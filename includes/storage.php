@@ -18,10 +18,17 @@ if (!function_exists('appUsesDatabaseUploads')) {
     }
 }
 
+if (!function_exists('appUsesSupabaseUploads')) {
+    function appUsesSupabaseUploads(): bool
+    {
+        return defined('UPLOAD_DRIVER') && UPLOAD_DRIVER === 'supabase';
+    }
+}
+
 if (!function_exists('appUsesLocalUploads')) {
     function appUsesLocalUploads(): bool
     {
-        return !appUsesDatabaseUploads();
+        return !appUsesDatabaseUploads() && !appUsesSupabaseUploads();
     }
 }
 
@@ -92,6 +99,12 @@ if (!function_exists('storedFilePathToUrl')) {
             return rtrim(BASE_URL, '/') . '/api/file.php?key=' . rawurlencode($storageKey);
         }
 
+        if (strpos($path, 'supabase:') === 0) {
+            $storagePath = substr($path, 9);
+            $signedUrl = supabaseStorageCreateSignedUrl($storagePath);
+            return $signedUrl !== '' ? $signedUrl : ($fallback ?? '');
+        }
+
         if (isAbsoluteUrl($path)) {
             return $path;
         }
@@ -101,6 +114,108 @@ if (!function_exists('storedFilePathToUrl')) {
         }
 
         return rtrim(BASE_URL, '/') . '/' . ltrim($path, '/');
+    }
+}
+
+if (!function_exists('supabaseStorageConfigured')) {
+    function supabaseStorageConfigured(): bool
+    {
+        return defined('SUPABASE_PROJECT_URL')
+            && trim((string) SUPABASE_PROJECT_URL) !== ''
+            && defined('SUPABASE_SERVICE_ROLE_KEY')
+            && trim((string) SUPABASE_SERVICE_ROLE_KEY) !== ''
+            && defined('SUPABASE_STORAGE_BUCKET')
+            && trim((string) SUPABASE_STORAGE_BUCKET) !== '';
+    }
+}
+
+if (!function_exists('supabaseStorageBaseUrl')) {
+    function supabaseStorageBaseUrl(): string
+    {
+        return rtrim((string) SUPABASE_PROJECT_URL, '/') . '/storage/v1';
+    }
+}
+
+if (!function_exists('supabaseStorageRequest')) {
+    function supabaseStorageRequest(string $method, string $endpoint, ?string $body = null, array $headers = []): array
+    {
+        if (!supabaseStorageConfigured()) {
+            return ['success' => false, 'status' => 0, 'body' => '', 'error' => 'Supabase Storage is not configured.'];
+        }
+
+        $url = supabaseStorageBaseUrl() . '/' . ltrim($endpoint, '/');
+        $defaultHeaders = [
+            'apikey: ' . SUPABASE_SERVICE_ROLE_KEY,
+            'Authorization: Bearer ' . SUPABASE_SERVICE_ROLE_KEY,
+        ];
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_CUSTOMREQUEST => strtoupper($method),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER => false,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_HTTPHEADER => array_merge($defaultHeaders, $headers),
+        ]);
+
+        if ($body !== null) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+        }
+
+        $responseBody = curl_exec($ch);
+        $error = curl_error($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        curl_close($ch);
+
+        return [
+            'success' => $error === '' && $status >= 200 && $status < 300,
+            'status' => $status,
+            'body' => is_string($responseBody) ? $responseBody : '',
+            'error' => $error,
+        ];
+    }
+}
+
+if (!function_exists('supabaseStorageNormalizePath')) {
+    function supabaseStorageNormalizePath(string $path): string
+    {
+        return trim(preg_replace('#/+#', '/', str_replace('\\', '/', $path)), '/');
+    }
+}
+
+if (!function_exists('supabaseStorageCreateSignedUrl')) {
+    function supabaseStorageCreateSignedUrl(string $storagePath, int $expiresIn = 3600): string
+    {
+        $storagePath = supabaseStorageNormalizePath($storagePath);
+        if ($storagePath === '') {
+            return '';
+        }
+
+        $endpoint = 'object/sign/' . rawurlencode((string) SUPABASE_STORAGE_BUCKET) . '/' . str_replace('%2F', '/', rawurlencode($storagePath));
+        $result = supabaseStorageRequest(
+            'POST',
+            $endpoint,
+            json_encode(['expiresIn' => $expiresIn]),
+            ['Content-Type: application/json']
+        );
+
+        if (!$result['success']) {
+            error_log('Supabase signed URL error: ' . json_encode($result));
+            return '';
+        }
+
+        $data = json_decode($result['body'], true);
+        $signedPath = is_array($data) ? ($data['signedURL'] ?? $data['signedUrl'] ?? '') : '';
+        if (!is_string($signedPath) || $signedPath === '') {
+            return '';
+        }
+
+        if (isAbsoluteUrl($signedPath)) {
+            return $signedPath;
+        }
+
+        return supabaseStorageBaseUrl() . '/' . ltrim($signedPath, '/');
     }
 }
 
@@ -163,6 +278,17 @@ if (!function_exists('storedFileExists')) {
             $stmt = $pdo->prepare("SELECT 1 FROM uploaded_files WHERE storage_key = ? LIMIT 1");
             $stmt->execute([$storageKey]);
             return (bool) $stmt->fetchColumn();
+        }
+
+        if (strpos($path, 'supabase:') === 0) {
+            $storagePath = supabaseStorageNormalizePath(substr($path, 9));
+            if ($storagePath === '') {
+                return false;
+            }
+
+            $endpoint = 'object/' . rawurlencode((string) SUPABASE_STORAGE_BUCKET) . '/' . str_replace('%2F', '/', rawurlencode($storagePath));
+            $result = supabaseStorageRequest('HEAD', $endpoint);
+            return $result['success'];
         }
 
         if (isAbsoluteUrl($path)) {
@@ -296,6 +422,19 @@ if (!function_exists('deleteStoredFileByPath')) {
             $storageKey = substr($path, 7);
             $stmt = $pdo->prepare("DELETE FROM uploaded_files WHERE storage_key = ?");
             $stmt->execute([$storageKey]);
+            return;
+        }
+
+        if (strpos($path, 'supabase:') === 0) {
+            $storagePath = supabaseStorageNormalizePath(substr($path, 9));
+            if ($storagePath !== '') {
+                supabaseStorageRequest(
+                    'DELETE',
+                    'object/' . rawurlencode((string) SUPABASE_STORAGE_BUCKET),
+                    json_encode(['prefixes' => [$storagePath]]),
+                    ['Content-Type: application/json']
+                );
+            }
             return;
         }
 
@@ -433,6 +572,48 @@ if (!function_exists('insertStoredBlobRecord')) {
     }
 }
 
+if (!function_exists('storeUploadedFileInSupabase')) {
+    function storeUploadedFileInSupabase(string $tmpName, string $safeFilename, string $mimeType, string $folder, string $namePrefix): array
+    {
+        if (!supabaseStorageConfigured()) {
+            return ['success' => false, 'error' => 'Supabase Storage is not configured.'];
+        }
+
+        $folder = supabaseStorageNormalizePath($folder);
+        $prefix = preg_replace('/[^A-Za-z0-9_\-]/', '_', $namePrefix);
+        $storageFilename = $prefix . uniqid('', true) . '_' . $safeFilename;
+        $storagePath = supabaseStorageNormalizePath(($folder !== '' ? $folder . '/' : '') . $storageFilename);
+        $contents = file_get_contents($tmpName);
+
+        if ($contents === false || strlen($contents) === 0) {
+            return ['success' => false, 'error' => "Failed to read uploaded file '{$safeFilename}'."];
+        }
+
+        $endpoint = 'object/' . rawurlencode((string) SUPABASE_STORAGE_BUCKET) . '/' . str_replace('%2F', '/', rawurlencode($storagePath));
+        $result = supabaseStorageRequest(
+            'POST',
+            $endpoint,
+            $contents,
+            [
+                'Content-Type: ' . $mimeType,
+                'cache-control: 3600',
+            ]
+        );
+
+        if (!$result['success']) {
+            error_log('Supabase upload error: ' . json_encode($result));
+            return ['success' => false, 'error' => "Failed to store file in Supabase Storage."];
+        }
+
+        return [
+            'success' => true,
+            'name' => $storageFilename,
+            'path' => 'supabase:' . $storagePath,
+            'url' => storedFilePathToUrl('supabase:' . $storagePath),
+        ];
+    }
+}
+
 if (!function_exists('storeUploadedFile')) {
     function storeUploadedFile(PDO $pdo, array $file, string $folder = '', string $namePrefix = 'file_', ?array $allowedTypes = null, ?int $maxBytes = null, ?string $basePath = null): array
     {
@@ -463,6 +644,10 @@ if (!function_exists('storeUploadedFile')) {
         $folder = trim(str_replace('\\', '/', $folder), '/');
         $safeFilename = storageSanitizeFilename($originalName);
         $prefix = preg_replace('/[^A-Za-z0-9_\-]/', '_', $namePrefix);
+
+        if (appUsesSupabaseUploads()) {
+            return storeUploadedFileInSupabase($tmpName, $safeFilename, $mimeType, $folder, $namePrefix);
+        }
 
         if (appUsesDatabaseUploads()) {
             ensureUploadedFilesTable($pdo);
