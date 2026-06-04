@@ -1552,7 +1552,7 @@ $page_title = 'Apply for Scholarship';
     <script>
         window.SCHOLARSHIP_UPLOAD_CONFIG = {
             supabaseDirectUpload: <?php echo $supabase_direct_upload_enabled ? 'true' : 'false'; ?>,
-            signUrl: <?php echo json_encode(rtrim(BASE_URL, '/') . '/api/supabase-upload-sign.php'); ?>,
+            signUrl: <?php echo json_encode('../api/supabase-upload-sign.php'); ?>,
             maxFileBytes: <?php echo (int) appUploadMaxBytes(); ?>,
             maxFileLabel: <?php echo json_encode(appUploadMaxLabel()); ?>,
             legacyTotalMaxBytes: 3984588,
@@ -1736,14 +1736,13 @@ $page_title = 'Apply for Scholarship';
                         throw new Error('Unable to match one of the selected documents.');
                     }
 
-                    const body = new FormData();
-                    body.append('cacheControl', '3600');
-                    body.append('', selected.file);
-
                     const uploadResponse = await fetch(signedFile.signed_url, {
                         method: 'PUT',
-                        headers: { 'x-upsert': 'false' },
-                        body
+                        headers: {
+                            'Content-Type': selected.file.type || 'application/pdf',
+                            'Cache-Control': '3600'
+                        },
+                        body: selected.file
                     });
 
                     if (!uploadResponse.ok) {
