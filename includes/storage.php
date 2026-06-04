@@ -219,6 +219,38 @@ if (!function_exists('supabaseStorageCreateSignedUrl')) {
     }
 }
 
+if (!function_exists('supabaseStorageObjectExists')) {
+    function supabaseStorageObjectExists(string $storagePath, int $attempts = 4, int $delayMicroseconds = 250000): bool
+    {
+        $storagePath = supabaseStorageNormalizePath($storagePath);
+        if ($storagePath === '') {
+            return false;
+        }
+
+        $encodedBucket = rawurlencode((string) SUPABASE_STORAGE_BUCKET);
+        $encodedPath = str_replace('%2F', '/', rawurlencode($storagePath));
+
+        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            $headResult = supabaseStorageRequest('HEAD', 'object/' . $encodedBucket . '/' . $encodedPath);
+            if ($headResult['success']) {
+                return true;
+            }
+
+            $infoResult = supabaseStorageRequest('GET', 'object/info/' . $encodedBucket . '/' . $encodedPath);
+            if ($infoResult['success']) {
+                return true;
+            }
+
+            if ($attempt < $attempts) {
+                usleep($delayMicroseconds);
+            }
+        }
+
+        error_log('Supabase object existence check failed for ' . $storagePath);
+        return false;
+    }
+}
+
 if (!function_exists('defaultAvatarUrl')) {
     function defaultAvatarUrl(?string $label = null): string
     {
@@ -286,9 +318,7 @@ if (!function_exists('storedFileExists')) {
                 return false;
             }
 
-            $endpoint = 'object/' . rawurlencode((string) SUPABASE_STORAGE_BUCKET) . '/' . str_replace('%2F', '/', rawurlencode($storagePath));
-            $result = supabaseStorageRequest('HEAD', $endpoint);
-            return $result['success'];
+            return supabaseStorageObjectExists($storagePath);
         }
 
         if (isAbsoluteUrl($path)) {
