@@ -1661,6 +1661,20 @@ $page_title = 'Apply for Scholarship';
                 }
             };
 
+            const fallbackToRegularSubmission = function() {
+                const hiddenInput = document.getElementById('supabase_uploaded_documents');
+                if (hiddenInput) {
+                    hiddenInput.value = '';
+                }
+
+                document.querySelectorAll('input[type="file"]').forEach(input => {
+                    input.disabled = false;
+                });
+
+                confirmSubmitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Submitting...';
+                form.submit();
+            };
+
             const collectApplicationFiles = function() {
                 const selectedFiles = [];
                 const supportingInput = document.getElementById('documents_new');
@@ -1774,6 +1788,7 @@ $page_title = 'Apply for Scholarship';
             };
 
             confirmSubmitBtn.addEventListener('click', async function() {
+                const config = window.SCHOLARSHIP_UPLOAD_CONFIG || {};
                 confirmSubmitBtn.disabled = true;
                 cancelPrivacyBtn.disabled = true;
                 confirmSubmitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Uploading documents...';
@@ -1791,7 +1806,19 @@ $page_title = 'Apply for Scholarship';
                     confirmSubmitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Submitting...';
                     form.submit();
                 } catch (error) {
-                    resetSubmitButton(error.message || 'Unable to upload documents. Please try again.');
+                    if (config.supabaseDirectUpload) {
+                        const fallbackMessage = error && error.message === 'Failed to fetch'
+                            ? 'Direct upload did not finish on this device. The system will retry through the regular submission flow.'
+                            : (error && error.message
+                                ? error.message + ' The system will retry through the regular submission flow.'
+                                : 'Direct upload did not finish. The system will retry through the regular submission flow.');
+
+                        alert(fallbackMessage);
+                        fallbackToRegularSubmission();
+                        return;
+                    }
+
+                    resetSubmitButton(error && error.message ? error.message : 'Unable to upload documents. Please try again.');
                 }
             });
 
