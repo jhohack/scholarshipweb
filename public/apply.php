@@ -1707,20 +1707,25 @@ $page_title = 'Apply for Scholarship';
                     return [];
                 }
 
-                const signResponse = await fetch(config.signUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({
-                        files: selectedFiles.map(item => ({
-                            input_name: item.input_name,
-                            index: item.index,
-                            name: item.file.name,
-                            size: item.file.size,
-                            type: item.file.type || 'application/pdf'
-                        }))
-                    })
-                });
+                let signResponse;
+                try {
+                    signResponse = await fetch(config.signUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            files: selectedFiles.map(item => ({
+                                input_name: item.input_name,
+                                index: item.index,
+                                name: item.file.name,
+                                size: item.file.size,
+                                type: item.file.type || 'application/pdf'
+                            }))
+                        })
+                    });
+                } catch (error) {
+                    throw new Error('Unable to reach the upload signing service. Please try again.');
+                }
 
                 const signData = await signResponse.json().catch(() => null);
                 if (!signResponse.ok || !signData || !signData.success) {
@@ -1736,14 +1741,18 @@ $page_title = 'Apply for Scholarship';
                         throw new Error('Unable to match one of the selected documents.');
                     }
 
-                    const uploadResponse = await fetch(signedFile.signed_url, {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': selected.file.type || 'application/pdf',
-                            'Cache-Control': '3600'
-                        },
-                        body: selected.file
-                    });
+                    let uploadResponse;
+                    try {
+                        uploadResponse = await fetch(signedFile.signed_url, {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': selected.file.type || 'application/pdf'
+                            },
+                            body: selected.file
+                        });
+                    } catch (error) {
+                        throw new Error(`Unable to upload "${selected.file.name}". Please try again.`);
+                    }
 
                     if (!uploadResponse.ok) {
                         throw new Error(`Failed to upload "${selected.file.name}" to Supabase Storage.`);
