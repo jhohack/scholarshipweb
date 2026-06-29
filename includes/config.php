@@ -16,6 +16,9 @@ if (!function_exists('env_config')) {
                     $value = trim(substr($value, 1, -1));
                 }
             }
+
+            // Normalize accidental CR/LF characters from pasted env values.
+            $value = trim(str_replace(["\r", "\n"], '', $value));
         }
 
         return ($value === false || $value === null || $value === '') ? $default : $value;
