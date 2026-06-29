@@ -644,6 +644,84 @@ if (!function_exists('storeUploadedFileInSupabase')) {
     }
 }
 
+if (!function_exists('replaceApplicationDocumentWithStoredPath')) {
+    function replaceApplicationDocumentWithStoredPath(
+        PDO $pdo,
+        int $documentId,
+        string $storedPath,
+        string $storedName,
+        ?int $expectedUserId = null,
+        ?int $expectedApplicationId = null,
+        ?string $basePath = null
+    ): array {
+        $stmt = $pdo->prepare("
+            SELECT id, user_id, application_id, file_name, file_path
+            FROM documents
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$documentId]);
+        $document = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$document) {
+            return ['success' => false, 'error' => 'Document record not found.'];
+        }
+
+        if ($expectedUserId !== null && (int) ($document['user_id'] ?? 0) !== $expectedUserId) {
+            return ['success' => false, 'error' => 'You are not allowed to replace this document.'];
+        }
+
+        if ($expectedApplicationId !== null && (int) ($document['application_id'] ?? 0) !== $expectedApplicationId) {
+            return ['success' => false, 'error' => 'This document does not belong to the selected application.'];
+        }
+
+        $storedPath = trim($storedPath);
+        $storedName = storageSanitizeFilename($storedName);
+
+        if ($storedPath === '') {
+            return ['success' => false, 'error' => 'Uploaded document reference is missing a file path.'];
+        }
+
+        if ($storedName === '') {
+            return ['success' => false, 'error' => 'Uploaded document reference is missing a file name.'];
+        }
+
+        if (!storedFileExists($pdo, $storedPath, $basePath)) {
+            return ['success' => false, 'error' => "Uploaded file '{$storedName}' was not found. Please upload it again."];
+        }
+
+        $oldPath = $document['file_path'] ?? '';
+
+        try {
+            $updateStmt = $pdo->prepare("
+                UPDATE documents
+                SET file_name = ?, file_path = ?, uploaded_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ");
+            $updateStmt->execute([
+                $storedName,
+                $storedPath,
+                $documentId,
+            ]);
+        } catch (Throwable $e) {
+            return ['success' => false, 'error' => 'Failed to update the document record: ' . $e->getMessage()];
+        }
+
+        if ($oldPath !== '' && $oldPath !== $storedPath) {
+            deleteStoredFileByPath($pdo, $oldPath, $basePath);
+        }
+
+        return [
+            'success' => true,
+            'document_id' => $documentId,
+            'name' => $storedName,
+            'path' => $storedPath,
+            'previous_name' => $document['file_name'] ?? '',
+            'previous_path' => $oldPath,
+        ];
+    }
+}
+
 if (!function_exists('storeUploadedFile')) {
     function storeUploadedFile(PDO $pdo, array $file, string $folder = '', string $namePrefix = 'file_', ?array $allowedTypes = null, ?int $maxBytes = null, ?string $basePath = null): array
     {

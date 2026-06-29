@@ -22,6 +22,7 @@ $request_group = null;
 $application_documents = [];
 $generic_reupload_mode = false;
 $errors = [];
+$supabase_direct_upload_enabled = appUsesSupabaseUploads() && supabaseStorageConfigured();
 
 try {
     $student_id = (int) (getCurrentStudentId($pdo, $user_id) ?? 0);
@@ -65,6 +66,47 @@ try {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_reupload'])) {
     $submitted_application_id = filter_input(INPUT_POST, 'application_id', FILTER_SANITIZE_NUMBER_INT);
+    $supabase_uploaded_refs = [];
+    $supabase_uploaded_raw = trim((string) ($_POST['supabase_uploaded_documents'] ?? ''));
+
+    if ($supabase_uploaded_raw !== '') {
+        $decoded_uploaded = json_decode($supabase_uploaded_raw, true);
+        if (!is_array($decoded_uploaded)) {
+            $errors[] = 'Uploaded document references were invalid. Please refresh the page and try again.';
+        } else {
+            $allowed_supabase_prefix = 'applications/user_' . (int) $user_id . '/';
+            foreach ($decoded_uploaded as $uploaded_ref) {
+                if (!is_array($uploaded_ref)) {
+                    continue;
+                }
+
+                $documentKey = trim((string) ($uploaded_ref['document_key'] ?? ''));
+                $documentPath = trim((string) ($uploaded_ref['document_path'] ?? ''));
+                $storagePath = strpos($documentPath, 'supabase:') === 0 ? substr($documentPath, 9) : '';
+                $fileName = storageSanitizeFilename((string) ($uploaded_ref['name'] ?? $uploaded_ref['original_name'] ?? 'document.pdf'));
+
+                if ($documentKey === '' || $documentPath === '' || $storagePath === '') {
+                    $errors[] = 'One uploaded document reference was incomplete. Please upload the file again.';
+                    continue;
+                }
+
+                if (strpos($storagePath, $allowed_supabase_prefix) !== 0) {
+                    $errors[] = 'One uploaded document reference did not match your account. Please upload the file again.';
+                    continue;
+                }
+
+                if (!storedFileExists($pdo, $documentPath, $base_path)) {
+                    $errors[] = "Uploaded file '{$fileName}' was not found in Supabase Storage. Please upload it again.";
+                    continue;
+                }
+
+                $supabase_uploaded_refs[$documentKey] = [
+                    'name' => $fileName,
+                    'path' => $documentPath,
+                ];
+            }
+        }
+    }
 
     if (!validate_csrf_token($_POST['csrf_token'] ?? '')) {
         $errors[] = 'Your session expired. Please refresh the page and try again.';
@@ -79,9 +121,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_reupload'])) {
             $missingFiles = [];
             foreach ($requests as $request) {
                 $reqId = (int) ($request['request_id'] ?? 0);
+                $documentKey = 'request_' . $reqId;
+                $hasSupabaseUpload = isset($supabase_uploaded_refs[$documentKey]);
                 $fileName = $_FILES['replacement_files']['name'][$reqId] ?? '';
                 $fileError = $_FILES['replacement_files']['error'][$reqId] ?? UPLOAD_ERR_NO_FILE;
-                if ($reqId <= 0 || $fileError !== UPLOAD_ERR_OK || trim((string) $fileName) === '') {
+                $hasPostedUpload = $fileError === UPLOAD_ERR_OK && trim((string) $fileName) !== '';
+                if ($reqId <= 0 || (!$hasSupabaseUpload && !$hasPostedUpload)) {
                     $missingFiles[] = trim((string) ($request['document_name'] ?? 'Document'));
                 }
             }
@@ -102,15 +147,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_reupload'])) {
                     foreach ($requests as $request) {
                         $reqId = (int) ($request['request_id'] ?? 0);
                         $documentId = (int) ($request['document_id'] ?? 0);
-                        $file = [
-                            'name' => $_FILES['replacement_files']['name'][$reqId] ?? '',
-                            'type' => $_FILES['replacement_files']['type'][$reqId] ?? '',
-                            'tmp_name' => $_FILES['replacement_files']['tmp_name'][$reqId] ?? '',
-                            'error' => $_FILES['replacement_files']['error'][$reqId] ?? UPLOAD_ERR_NO_FILE,
-                            'size' => $_FILES['replacement_files']['size'][$reqId] ?? 0,
-                        ];
+                        $documentKey = 'request_' . $reqId;
+                        $uploadedRef = $supabase_uploaded_refs[$documentKey] ?? null;
 
-                        $result = replaceApplicationDocument($pdo, $documentId, $file, $user_id, (int) $application['id'], $base_path);
+                        if ($uploadedRef) {
+                            $result = replaceApplicationDocumentWithStoredPath(
+                                $pdo,
+                                $documentId,
+                                (string) ($uploadedRef['path'] ?? ''),
+                                (string) ($uploadedRef['name'] ?? ''),
+                                $user_id,
+                                (int) $application['id'],
+                                $base_path
+                            );
+                        } else {
+                            $file = [
+                                'name' => $_FILES['replacement_files']['name'][$reqId] ?? '',
+                                'type' => $_FILES['replacement_files']['type'][$reqId] ?? '',
+                                'tmp_name' => $_FILES['replacement_files']['tmp_name'][$reqId] ?? '',
+                                'error' => $_FILES['replacement_files']['error'][$reqId] ?? UPLOAD_ERR_NO_FILE,
+                                'size' => $_FILES['replacement_files']['size'][$reqId] ?? 0,
+                            ];
+
+                            $result = replaceApplicationDocument($pdo, $documentId, $file, $user_id, (int) $application['id'], $base_path);
+                        }
+
                         if (empty($result['success'])) {
                             throw new RuntimeException($result['error'] ?? 'Failed to replace one of the requested documents.');
                         }
@@ -150,10 +211,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_reupload'])) {
                         continue;
                     }
 
+                    $documentKey = 'document_' . $documentId;
+                    $hasSupabaseUpload = isset($supabase_uploaded_refs[$documentKey]);
                     $fileName = $_FILES['replacement_files']['name'][$documentId] ?? '';
                     $fileError = $_FILES['replacement_files']['error'][$documentId] ?? UPLOAD_ERR_NO_FILE;
                     $removeRequested = !empty($_POST['remove_files'][$documentId]);
-                    $hasUpload = $fileError !== UPLOAD_ERR_NO_FILE && trim((string) $fileName) !== '';
+                    $hasUpload = $hasSupabaseUpload || ($fileError !== UPLOAD_ERR_NO_FILE && trim((string) $fileName) !== '');
 
                     if ($hasUpload) {
                         $removeRequested = false;
@@ -173,6 +236,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_reupload'])) {
 
                     $replacement_docs[] = [
                         'document_id' => $documentId,
+                        'document_key' => $documentKey,
                         'file' => [
                             'name' => $fileName,
                             'type' => $_FILES['replacement_files']['type'][$documentId] ?? '',
@@ -194,14 +258,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_reupload'])) {
                             $pdo->beginTransaction();
 
                             foreach ($replacement_docs as $item) {
-                                $result = replaceApplicationDocument(
-                                    $pdo,
-                                    (int) $item['document_id'],
-                                    $item['file'],
-                                    $user_id,
-                                    (int) $application['id'],
-                                    $base_path
-                                );
+                                $uploadedRef = $supabase_uploaded_refs[$item['document_key']] ?? null;
+                                if ($uploadedRef) {
+                                    $result = replaceApplicationDocumentWithStoredPath(
+                                        $pdo,
+                                        (int) $item['document_id'],
+                                        (string) ($uploadedRef['path'] ?? ''),
+                                        (string) ($uploadedRef['name'] ?? ''),
+                                        $user_id,
+                                        (int) $application['id'],
+                                        $base_path
+                                    );
+                                } else {
+                                    $result = replaceApplicationDocument(
+                                        $pdo,
+                                        (int) $item['document_id'],
+                                        $item['file'],
+                                        $user_id,
+                                        (int) $application['id'],
+                                        $base_path
+                                    );
+                                }
 
                                 if (empty($result['success'])) {
                                     throw new RuntimeException($result['error'] ?? 'Failed to replace one of the selected documents.');
@@ -322,6 +399,7 @@ displayFlashMessages();
                     <input type="hidden" name="submit_reupload" value="1">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(generate_csrf_token()); ?>">
                     <input type="hidden" name="application_id" value="<?php echo (int) $application['id']; ?>">
+                    <input type="hidden" name="supabase_uploaded_documents" class="supabase-uploaded-documents" value="">
 
                     <div class="row g-3">
                         <?php foreach ($request_group['documents'] as $request): ?>
@@ -351,8 +429,9 @@ displayFlashMessages();
                                         </div>
                                         <div class="mt-3">
                                             <label class="form-label fw-bold">Replace this file with a PDF</label>
-                                            <input type="file" class="form-control reupload-file-input" name="replacement_files[<?php echo (int) $request['request_id']; ?>]" accept=".pdf,application/pdf" required>
+                                            <input type="file" class="form-control reupload-file-input" data-upload-key="request_<?php echo (int) $request['request_id']; ?>" name="replacement_files[<?php echo (int) $request['request_id']; ?>]" accept=".pdf,application/pdf" required>
                                             <div class="form-text">PDF only. This will replace the current file in the same slot.</div>
+                                            <div class="small text-muted mt-2 upload-status" aria-live="polite"></div>
                                         </div>
                                         <?php if (!empty($request['note'])): ?>
                                             <div class="small text-warning mt-3">
@@ -428,6 +507,7 @@ displayFlashMessages();
                     <input type="hidden" name="submit_reupload" value="1">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(generate_csrf_token()); ?>">
                     <input type="hidden" name="application_id" value="<?php echo (int) $application['id']; ?>">
+                    <input type="hidden" name="supabase_uploaded_documents" class="supabase-uploaded-documents" value="">
 
                     <div class="row g-3">
                         <?php foreach ($application_documents as $document): ?>
@@ -459,8 +539,9 @@ displayFlashMessages();
                                         </div>
                                         <div class="mt-3">
                                             <label class="form-label fw-bold">Replace this file with a PDF</label>
-                                            <input type="file" class="form-control reupload-file-input" name="replacement_files[<?php echo $documentId; ?>]" accept=".pdf,application/pdf">
+                                            <input type="file" class="form-control reupload-file-input" data-upload-key="document_<?php echo $documentId; ?>" name="replacement_files[<?php echo $documentId; ?>]" accept=".pdf,application/pdf">
                                             <div class="form-text">Upload only if this file needs to change. It will overwrite the current copy.</div>
+                                            <div class="small text-muted mt-2 upload-status" aria-live="polite"></div>
                                         </div>
                                         <?php if ($currentAvailable): ?>
                                             <div class="form-check mt-3">
@@ -522,6 +603,14 @@ displayFlashMessages();
 <?php endif; ?>
 
 <script>
+window.REUPLOAD_UPLOAD_CONFIG = {
+    supabaseDirectUpload: <?php echo $supabase_direct_upload_enabled ? 'true' : 'false'; ?>,
+    signUrl: <?php echo json_encode('../api/supabase-upload-sign.php'); ?>,
+    maxFileBytes: <?php echo (int) appUploadMaxBytes(); ?>,
+    maxFileLabel: <?php echo json_encode(appUploadMaxLabel()); ?>
+};
+</script>
+<script>
 document.addEventListener('change', function (event) {
     const fileInput = event.target.closest('.reupload-file-input');
     if (fileInput) {
@@ -540,6 +629,173 @@ document.addEventListener('change', function (event) {
             fileInput.value = '';
         }
     }
+});
+
+document.addEventListener('DOMContentLoaded', function () {
+    const config = window.REUPLOAD_UPLOAD_CONFIG || {};
+    const forms = document.querySelectorAll('form[method="post"][enctype="multipart/form-data"]');
+
+    forms.forEach(function (form) {
+        const hiddenInput = form.querySelector('.supabase-uploaded-documents');
+        const submitButton = form.querySelector('button[type="submit"]');
+        const fileInputs = Array.from(form.querySelectorAll('.reupload-file-input'));
+        const uploadedRefs = {};
+
+        const renderUploadedRefs = function () {
+            if (!hiddenInput) {
+                return;
+            }
+
+            hiddenInput.value = JSON.stringify(Object.keys(uploadedRefs).map(function (documentKey) {
+                return Object.assign({ document_key: documentKey }, uploadedRefs[documentKey]);
+            }));
+        };
+
+        const setStatus = function (input, message, isError) {
+            const inputGroup = input.closest('.mt-3');
+            const statusEl = inputGroup ? inputGroup.querySelector('.upload-status') : null;
+            if (!statusEl) {
+                return;
+            }
+
+            statusEl.textContent = message || '';
+            statusEl.classList.toggle('text-danger', !!isError);
+            statusEl.classList.toggle('text-success', !isError && !!message);
+        };
+
+        fileInputs.forEach(function (input) {
+            input.addEventListener('change', function () {
+                const documentKey = input.dataset.uploadKey || '';
+                if (documentKey) {
+                    delete uploadedRefs[documentKey];
+                    renderUploadedRefs();
+                }
+
+                if (!input.files || input.files.length === 0) {
+                    setStatus(input, '');
+                    return;
+                }
+
+                const file = input.files[0];
+                if ((file.type && file.type !== 'application/pdf') || !/\.pdf$/i.test(file.name)) {
+                    input.value = '';
+                    setStatus(input, 'Only PDF files can be uploaded.', true);
+                    return;
+                }
+
+                if (file.size > config.maxFileBytes) {
+                    input.value = '';
+                    setStatus(input, `"${file.name}" exceeds the ${config.maxFileLabel} upload limit.`, true);
+                    return;
+                }
+
+                setStatus(input, '');
+            });
+        });
+
+        form.addEventListener('submit', async function (event) {
+            if (!config.supabaseDirectUpload) {
+                return;
+            }
+
+            const pendingInputs = fileInputs.filter(function (input) {
+                const documentKey = input.dataset.uploadKey || '';
+                return input.files && input.files.length > 0 && !uploadedRefs[documentKey];
+            });
+
+            if (pendingInputs.length === 0) {
+                renderUploadedRefs();
+                return;
+            }
+
+            event.preventDefault();
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.dataset.originalText = submitButton.dataset.originalText || submitButton.innerHTML;
+                submitButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Uploading...';
+            }
+
+            try {
+                const filesToUpload = pendingInputs.map(function (input) {
+                    return {
+                        input,
+                        document_key: input.dataset.uploadKey || '',
+                        file: input.files[0]
+                    };
+                });
+
+                const signResponse = await fetch(config.signUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        files: filesToUpload.map(function (item, index) {
+                            return {
+                                input_name: item.document_key,
+                                index: index,
+                                name: item.file.name,
+                                size: item.file.size,
+                                type: item.file.type || 'application/pdf'
+                            };
+                        })
+                    })
+                });
+
+                const signData = await signResponse.json().catch(function () { return null; });
+                if (!signResponse.ok || !signData || !signData.success) {
+                    throw new Error(signData?.error || 'Unable to prepare document upload. Please try again.');
+                }
+
+                for (const signedFile of signData.files || []) {
+                    const selected = filesToUpload.find(function (item, index) {
+                        return item.document_key === signedFile.input_name && index === Number(signedFile.index);
+                    });
+
+                    if (!selected) {
+                        throw new Error('Unable to match one of the selected documents.');
+                    }
+
+                    setStatus(selected.input, 'Uploading to secure storage...', false);
+
+                    const uploadResponse = await fetch(signedFile.signed_url, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': selected.file.type || 'application/pdf'
+                        },
+                        body: selected.file
+                    });
+
+                    if (!uploadResponse.ok) {
+                        throw new Error(`Failed to upload "${selected.file.name}". Please try again.`);
+                    }
+
+                    uploadedRefs[selected.document_key] = {
+                        name: signedFile.name,
+                        original_name: selected.file.name,
+                        document_path: signedFile.document_path,
+                        storage_path: signedFile.storage_path
+                    };
+
+                    selected.input.disabled = true;
+                    setStatus(selected.input, 'Uploaded successfully. Saving changes...', false);
+                }
+
+                renderUploadedRefs();
+                form.submit();
+            } catch (error) {
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.innerHTML = submitButton.dataset.originalText || 'Save Changes';
+                }
+
+                pendingInputs.forEach(function (input) {
+                    setStatus(input, '', false);
+                });
+
+                alert(error && error.message ? error.message : 'Unable to upload documents. Please try again.');
+            }
+        });
+    });
 });
 </script>
 
