@@ -500,19 +500,27 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     };
 
     // Update user info if provided. This happens before the main application logic.
-    if (!empty($contact_number) || !empty($birthdate) || (array_key_exists('school_id', $_POST) && $selected_school_id !== '')) {
+    if (!empty($contact_number) || !empty($birthdate) || array_key_exists('school_id', $_POST)) {
         try {
+            $normalized_school_id = trim((string) $selected_school_id);
+            if ($normalized_school_id !== '') {
+                $conflict_user_id = findSchoolIdConflictUserId($pdo, $normalized_school_id, (int) $user_id);
+                if ($conflict_user_id !== null) {
+                    $errors[] = "That school ID is already assigned to another account. Please use a different school ID.";
+                }
+            }
+
             $update_fields = [];
             $update_params = [];
-            if (!empty($contact_number)) { $update_fields[] = "contact_number = ?"; $update_params[] = $contact_number; }
-            if (!empty($birthdate)) { $update_fields[] = "birthdate = ?"; $update_params[] = $birthdate; }
-            if (array_key_exists('school_id', $_POST) && $selected_school_id !== '') {
+            if (empty($errors) && !empty($contact_number)) { $update_fields[] = "contact_number = ?"; $update_params[] = $contact_number; }
+            if (empty($errors) && !empty($birthdate)) { $update_fields[] = "birthdate = ?"; $update_params[] = $birthdate; }
+            if (empty($errors) && array_key_exists('school_id', $_POST)) {
                 $update_fields[] = "school_id = ?";
-                $update_params[] = $selected_school_id;
+                $update_params[] = $normalized_school_id !== '' ? $normalized_school_id : null;
             }
             $update_params[] = $user_id;
 
-            if (!empty($update_fields)) {
+            if (empty($errors) && !empty($update_fields)) {
                 $update_sql = "UPDATE users SET " . implode(', ', $update_fields) . " WHERE id = ?";
                 $update_user_stmt = $pdo->prepare($update_sql);
                 $update_user_stmt->execute($update_params);

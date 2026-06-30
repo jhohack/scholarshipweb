@@ -118,6 +118,23 @@ if (!function_exists('getAcademicProgramOptions')) {
     }
 }
 
+if (!function_exists('findSchoolIdConflictUserId')) {
+    function findSchoolIdConflictUserId(PDO $pdo, ?string $schoolId, ?int $currentUserId = null): ?int
+    {
+        $schoolId = trim((string) $schoolId);
+        if ($schoolId === '') {
+            return null;
+        }
+
+        $currentUserId = (int) ($currentUserId ?? 0);
+        $stmt = $pdo->prepare("SELECT id FROM users WHERE school_id = ? AND id != ? LIMIT 1");
+        $stmt->execute([$schoolId, $currentUserId]);
+        $conflictUserId = (int) $stmt->fetchColumn();
+
+        return $conflictUserId > 0 ? $conflictUserId : null;
+    }
+}
+
 if (!function_exists('normalizeAcademicProgram')) {
     function normalizeAcademicProgram(?string $program): ?string
     {

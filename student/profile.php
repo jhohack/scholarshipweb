@@ -49,6 +49,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     if (empty($first_name) || empty($last_name)) {
         $errors[] = "First Name and Last Name are required.";
+    } elseif (($conflict_user_id = findSchoolIdConflictUserId($pdo, $school_id, (int) $user_id)) !== null) {
+        $errors[] = "That school ID is already assigned to another account. Please use a different school ID.";
     } else {
         // --- Handle Profile Picture Upload ---
         $new_picture_path = $current_picture_path;
