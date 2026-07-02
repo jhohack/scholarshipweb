@@ -938,15 +938,19 @@ if ($scholarship_id) {
         $total_specific = $type_counts['new_applicants'] + $type_counts['renewal_applicants'];
 
         // Fetch Statistics (Unique Students - Latest Application)
-        $stats_sql = "
-            SELECT a.status, COUNT(a.id) as count 
-            FROM applications a 
+        $latest_application_join_sql = "
             INNER JOIN (
                 SELECT student_id, MAX(id) as max_id
                 FROM applications
                 WHERE scholarship_id = ?
                 GROUP BY student_id
-            ) latest ON a.id = latest.max_id
+            ) latest ON latest.max_id = a.id
+        ";
+
+        $stats_sql = "
+            SELECT a.status, COUNT(a.id) as count 
+            FROM applications a 
+            {$latest_application_join_sql}
             WHERE a.scholarship_id = ? 
             GROUP BY a.status
         ";
@@ -965,25 +969,22 @@ if ($scholarship_id) {
 
         // Fetch Applicants (Filter & Search Logic)
         $status_filter = $_GET['status_filter'] ?? 'pending';
-        $search = $_GET['search'] ?? '';
+        $search = trim((string) ($_GET['search'] ?? ''));
         $start_date = $_GET['start_date'] ?? '';
         $program_filter = normalizeAcademicProgram($_GET['program_filter'] ?? '') ?? '';
         $year_level_filter = $_GET['year_level_filter'] ?? '';
+        $search_length = function_exists('mb_strlen') ? mb_strlen($search, 'UTF-8') : strlen($search);
+        $effective_search = $search_length >= 2 ? $search : '';
         $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
         $limit = 20;
         $offset = ($page - 1) * $limit;
 
         $base_sql = "
             FROM applications a 
+            {$latest_application_join_sql}
             JOIN students s ON a.student_id = s.id 
             LEFT JOIN users u ON s.user_id = u.id
             WHERE a.scholarship_id = ?
-            AND a.id = (
-                SELECT MAX(sub.id) 
-                FROM applications sub 
-                WHERE sub.student_id = a.student_id 
-                AND sub.scholarship_id = ?
-            )
     ";
         $params = [$scholarship_id, $scholarship_id];
 
@@ -999,10 +1000,39 @@ if ($scholarship_id) {
             $base_sql .= " AND a.status = 'Rejected'";
         }
 
-        if (!empty($search)) {
-            $base_sql .= " AND (s.student_name LIKE ? OR s.school_id_number LIKE ?)";
-            $params[] = "%$search%";
-            $params[] = "%$search%";
+        if ($effective_search !== '') {
+            $search_operator = (defined('DB_DRIVER') && DB_DRIVER === 'pgsql') ? 'ILIKE' : 'LIKE';
+            $search_tokens = preg_split('/[\s,]+/', $effective_search, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+            if (!empty($search_tokens)) {
+                foreach ($search_tokens as $token) {
+                    $token = trim($token);
+                    if ($token === '') {
+                        continue;
+                    }
+
+                    $prefix_like = $token . '%';
+
+                    $base_sql .= "
+                        AND (
+                            s.school_id_number {$search_operator} ?
+                            OR s.student_name {$search_operator} ?
+                            OR u.first_name {$search_operator} ?
+                            OR u.middle_name {$search_operator} ?
+                            OR u.last_name {$search_operator} ?
+                        )
+                    ";
+
+                    array_push(
+                        $params,
+                        $prefix_like,
+                        $prefix_like,
+                        $prefix_like,
+                        $prefix_like,
+                        $prefix_like
+                    );
+                }
+            }
         }
 
         if (!empty($program_filter)) {
@@ -1024,7 +1054,7 @@ if ($scholarship_id) {
         $count_stmt = $pdo->prepare("SELECT COUNT(*) " . $base_sql);
         $count_stmt->execute($params);
         $total_rows = $count_stmt->fetchColumn();
-        $total_pages = ceil($total_rows / $limit);
+        $total_pages = max(1, (int) ceil($total_rows / $limit));
 
         // Fetch Data
         $sql = "SELECT a.*, s.student_name, s.email, s.school_id_number, s.program as student_program, s.year_level as student_year_level, u.profile_picture_path, u.first_name, u.middle_name, u.last_name " . $base_sql;
@@ -2026,7 +2056,7 @@ document.addEventListener('DOMContentLoaded', function() {
         searchInput.addEventListener('input', function() {
             currentPage = 1;
             clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(performLiveSearch, 300);
+            debounceTimer = setTimeout(performLiveSearch, 600);
         });
     }
     if (startDateInput) {
@@ -2109,12 +2139,19 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-let currentPage = 1;
+let currentPage = <?php echo max(1, (int) $page); ?>;
+
+function getNormalizedApplicantSearchTerm() {
+    const rawSearch = document.getElementById('liveSearchInput')?.value || '';
+    const trimmedSearch = rawSearch.trim();
+
+    return trimmedSearch.length >= 2 ? trimmedSearch : '';
+}
 
 function buildApplicationsActionUrl() {
     const params = new URLSearchParams();
     const scholarshipId = document.getElementById('scholarshipIdInput')?.value || '';
-    const search = document.getElementById('liveSearchInput')?.value || '';
+    const search = getNormalizedApplicantSearchTerm();
     const startDate = document.getElementById('startDateInput')?.value || '';
     const programFilter = document.getElementById('programFilterInput')?.value || '';
     const yearLevelFilter = document.getElementById('yearLevelFilterInput')?.value || '';
@@ -2193,7 +2230,7 @@ function performLiveSearch() {
         return Promise.resolve();
     }
 
-    const search = document.getElementById('liveSearchInput')?.value || '';
+    const search = getNormalizedApplicantSearchTerm();
     const startDate = document.getElementById('startDateInput')?.value || '';
     const program = document.getElementById('programFilterInput')?.value || '';
     const yearLevel = document.getElementById('yearLevelFilterInput')?.value || '';

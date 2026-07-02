@@ -193,9 +193,22 @@ if (!function_exists('dbEnsureIndexBatchOnce')) {
 if (!function_exists('dbEnsureStudentIndexes')) {
     function dbEnsureStudentIndexes(PDO $pdo): void
     {
-        dbEnsureIndexBatchOnce($pdo, 'schema.indexes.students.v1', function () use ($pdo) {
+        dbEnsureIndexBatchOnce($pdo, 'schema.indexes.students.v2', function () use ($pdo) {
             dbEnsureIndex($pdo, 'idx_students_user_id', 'students', ['user_id']);
             dbEnsureIndex($pdo, 'idx_students_school_id_number', 'students', ['school_id_number']);
+            dbEnsureIndex($pdo, 'idx_students_student_name', 'students', ['student_name']);
+        });
+    }
+}
+
+if (!function_exists('dbEnsureUserIndexes')) {
+    function dbEnsureUserIndexes(PDO $pdo): void
+    {
+        dbEnsureIndexBatchOnce($pdo, 'schema.indexes.users.v1', function () use ($pdo) {
+            dbEnsureIndex($pdo, 'idx_users_first_name', 'users', ['first_name']);
+            dbEnsureIndex($pdo, 'idx_users_middle_name', 'users', ['middle_name']);
+            dbEnsureIndex($pdo, 'idx_users_last_name', 'users', ['last_name']);
+            dbEnsureIndex($pdo, 'idx_users_school_id', 'users', ['school_id']);
         });
     }
 }
@@ -618,6 +631,7 @@ if (!function_exists('dbEnsureUserStudentSyncSchema')) {
         dbAddColumnIfMissing($pdo, 'students', 'program', 'VARCHAR(100) NULL DEFAULT NULL');
         dbAddColumnIfMissing($pdo, 'students', 'year_level', 'VARCHAR(50) NULL DEFAULT NULL');
         dbAddColumnIfMissing($pdo, 'students', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
+        dbEnsureUserIndexes($pdo);
         dbEnsureStudentIndexes($pdo);
     }
 }
