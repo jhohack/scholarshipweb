@@ -753,11 +753,7 @@ if (!function_exists('storeUploadedFile')) {
         $safeFilename = storageSanitizeFilename($originalName);
         $prefix = preg_replace('/[^A-Za-z0-9_\-]/', '_', $namePrefix);
 
-        if (appUsesSupabaseUploads()) {
-            return storeUploadedFileInSupabase($tmpName, $safeFilename, $mimeType, $folder, $namePrefix);
-        }
-
-        if (appUsesDatabaseUploads()) {
+        $storeInDatabase = function () use ($pdo, $tmpName, $folder, $safeFilename, $mimeType, $fileSize, $originalName): array {
             ensureUploadedFilesTable($pdo);
             $storageKey = bin2hex(random_bytes(16));
             $blobContents = file_get_contents($tmpName);
@@ -794,6 +790,26 @@ if (!function_exists('storeUploadedFile')) {
                 'path' => 'filedb:' . $storageKey,
                 'url' => storedFilePathToUrl('filedb:' . $storageKey),
             ];
+        };
+
+        if (appUsesSupabaseUploads()) {
+            $supabaseResult = storeUploadedFileInSupabase($tmpName, $safeFilename, $mimeType, $folder, $namePrefix);
+            if ($supabaseResult['success']) {
+                return $supabaseResult;
+            }
+
+            // Keep uploads working on Vercel even if Supabase Storage is unavailable or misconfigured.
+            error_log('Falling back to database upload after Supabase failure: ' . json_encode([
+                'folder' => $folder,
+                'file' => $safeFilename,
+                'error' => $supabaseResult['error'] ?? 'unknown',
+            ]));
+
+            return $storeInDatabase();
+        }
+
+        if (appUsesDatabaseUploads()) {
+            return $storeInDatabase();
         }
 
         if ($basePath === null || $basePath === '') {

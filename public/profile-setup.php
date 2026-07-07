@@ -15,6 +15,7 @@ if (!isset($_SESSION['is_verified_for_setup']) || !isset($_SESSION['registration
 }
 
 $errors = [];
+$upload_warning = null;
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $student_type = 'New Applicant'; // Automatically set to New Applicant
@@ -37,7 +38,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             if ($upload_result['success']) {
                 $picture_path = $upload_result['path'];
             } else {
-                $errors[] = $upload_result['error'] ?? "Failed to upload profile picture.";
+                $upload_warning = $upload_result['error'] ?? "Failed to upload profile picture.";
             }
         }
     }
@@ -163,6 +164,11 @@ $page_title = 'Complete Your Profile';
                                     <?php foreach ($errors as $error): ?>
                                         <p class="mb-0"><?php echo htmlspecialchars($error); ?></p>
                                     <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                            <?php if (!empty($upload_warning)): ?>
+                                <div class="alert alert-warning">
+                                    <p class="mb-0"><?php echo htmlspecialchars($upload_warning); ?> Your account will still be created without a profile picture.</p>
                                 </div>
                             <?php endif; ?>
 
