@@ -1,5 +1,18 @@
 <?php
 
+// Allow the registrar portal (hosted on a separate origin, e.g. Lovable/Vercel) to
+// call the JSON API. Frontend calls are CORS "simple" requests (GET + FormData POST),
+// but we also answer preflight so future JSON/header requests keep working.
+if (strpos($_SERVER['REQUEST_URI'] ?? '', '/api/') !== false) {
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type');
+    if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+        http_response_code(204);
+        exit;
+    }
+}
+
 if (!function_exists('env_config')) {
     function env_config(string $key, $default = null)
     {
@@ -84,10 +97,23 @@ if (!function_exists('loadLocalEnvFile')) {
 
 loadLocalEnvFile(dirname(__DIR__) . '/.env', false);
 loadLocalEnvFile(dirname(__DIR__) . '/.env.local');
+
 $maintenanceModeEnabled = env_config('MAINTENANCE_MODE', '1') === '1';
 $maintenanceAllowedScripts = [
     'maintenance.php',
 ];
+
+$requestUri = $_SERVER['REQUEST_URI'] ?? '/';
+$requestPath = parse_url($requestUri, PHP_URL_PATH);
+$normalizedRequestPath = is_string($requestPath) ? str_replace('\\', '/', $requestPath) : '/';
+$isAdminRequest = strpos($normalizedRequestPath, '/admin/') !== false;
+$isAdminPortalApiRequest = (
+    strpos($normalizedRequestPath, '/public/portal_api.php') !== false
+    && (
+        (($_GET['chat_context'] ?? '') === 'sys_bridge')
+        || (($_POST['chat_context'] ?? '') === 'sys_bridge')
+    )
+);
 
 if (!function_exists('respondWithMaintenanceMode')) {
     function respondWithMaintenanceMode(): void
@@ -116,11 +142,12 @@ if (!function_exists('respondWithMaintenanceMode')) {
 $currentScriptName = basename($_SERVER['SCRIPT_NAME'] ?? '');
 if (
     $maintenanceModeEnabled
+    && !$isAdminRequest
+    && !$isAdminPortalApiRequest
     && !in_array($currentScriptName, $maintenanceAllowedScripts, true)
 ) {
     respondWithMaintenanceMode();
 }
-
 
 $httpHost = $_SERVER['HTTP_HOST'] ?? '';
 $isLocalHost = $httpHost === '' || strpos($httpHost, 'localhost') === 0 || strpos($httpHost, '127.0.0.1') === 0;
