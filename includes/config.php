@@ -84,6 +84,43 @@ if (!function_exists('loadLocalEnvFile')) {
 
 loadLocalEnvFile(dirname(__DIR__) . '/.env', false);
 loadLocalEnvFile(dirname(__DIR__) . '/.env.local');
+$maintenanceModeEnabled = env_config('MAINTENANCE_MODE', '1') === '1';
+$maintenanceAllowedScripts = [
+    'maintenance.php',
+];
+
+if (!function_exists('respondWithMaintenanceMode')) {
+    function respondWithMaintenanceMode(): void
+    {
+        $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
+        $isApiRequest = strpos($requestUri, '/api/') !== false;
+
+        http_response_code(503);
+        header('Retry-After: 3600');
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+        if ($isApiRequest) {
+            header('Content-Type: application/json; charset=UTF-8');
+            echo json_encode([
+                'success' => false,
+                'message' => 'The scholarship portal is currently under maintenance.',
+            ]);
+            exit;
+        }
+
+        require dirname(__DIR__) . '/maintenance.php';
+        exit;
+    }
+}
+
+$currentScriptName = basename($_SERVER['SCRIPT_NAME'] ?? '');
+if (
+    $maintenanceModeEnabled
+    && !in_array($currentScriptName, $maintenanceAllowedScripts, true)
+) {
+    respondWithMaintenanceMode();
+}
+
 
 $httpHost = $_SERVER['HTTP_HOST'] ?? '';
 $isLocalHost = $httpHost === '' || strpos($httpHost, 'localhost') === 0 || strpos($httpHost, '127.0.0.1') === 0;
@@ -96,6 +133,7 @@ $derivedBaseUrl = $httpHost !== '' ? $requestScheme . '://' . $httpHost . $defau
 
 define('APP_ENV', env_config('APP_ENV', env_config('VERCEL_ENV', $isLocalHost ? 'local' : 'production')));
 define('IS_VERCEL', env_config('VERCEL', '0') === '1' || env_config('VERCEL_ENV') !== null);
+define('MAINTENANCE_MODE', $maintenanceModeEnabled);
 
 if ($httpHost === 'dvc.infinityfree.me' && env_config('DB_HOST') === null) {
     $legacyDbHost = 'sql312.infinityfree.com';

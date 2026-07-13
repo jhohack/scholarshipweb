@@ -1,5 +1,7 @@
 <?php
 
+$maintenanceFile = __DIR__ . DIRECTORY_SEPARATOR . 'maintenance.php';
+
 $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
 $uriPath = rawurldecode(parse_url($requestUri, PHP_URL_PATH) ?: '/');
 $uriPath = '/' . ltrim($uriPath, '/');
@@ -45,6 +47,11 @@ $serveStatic = static function (string $filePath) use ($mimeTypes): void {
     header('Cache-Control: no-cache, no-store, must-revalidate');
     readfile($filePath);
 };
+
+if (is_file($maintenanceFile) && basename($uriPath) !== 'maintenance.php') {
+    $servePhp($maintenanceFile, '/maintenance.php');
+    return true;
+}
 
 if ($uriPath === '/' || $uriPath === '') {
     $servePhp($publicDir . DIRECTORY_SEPARATOR . 'index.php', '/index.php');
