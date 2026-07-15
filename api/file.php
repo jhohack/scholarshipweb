@@ -13,13 +13,49 @@ require_once $base_path . '/includes/db.php';
 require_once $base_path . '/includes/functions.php';
 
 $storageKey = trim($_GET['key'] ?? '');
+$storedPath = trim($_GET['path'] ?? '');
 
-if ($storageKey === '') {
+if ($storageKey === '' && $storedPath === '') {
     http_response_code(404);
     exit('File not found.');
 }
 
 try {
+    if ($storedPath !== '') {
+        if (strpos($storedPath, 'supabase:') === 0) {
+            $storagePath = supabaseStorageNormalizePath(substr($storedPath, 9));
+            if ($storagePath === '') {
+                http_response_code(404);
+                exit('File not found.');
+            }
+
+            $signedUrl = supabaseStorageCreateSignedUrl($storagePath);
+            if ($signedUrl === '') {
+                http_response_code(404);
+                exit('File not found.');
+            }
+
+            header('Cache-Control: no-store');
+            header('Location: ' . $signedUrl, true, 302);
+            exit;
+        }
+
+        if (strpos($storedPath, 'uploads/') === 0) {
+            $legacyPath = $base_path . '/public/' . ltrim($storedPath, '/');
+            if (!is_file($legacyPath)) {
+                http_response_code(404);
+                exit('File not found.');
+            }
+
+            $mimeType = mime_content_type($legacyPath) ?: 'application/octet-stream';
+            header('Content-Type: ' . $mimeType);
+            header('Content-Length: ' . filesize($legacyPath));
+            header('Content-Disposition: inline; filename="' . addcslashes(basename($legacyPath), "\"\\") . '"');
+            readfile($legacyPath);
+            exit;
+        }
+    }
+
     ensureUploadedFilesTable($pdo);
 
     if (dbIsPgsql($pdo)) {

@@ -1,5 +1,8 @@
 .vercel
 .env*
+.tmp_*
+*.sql
+temp_scholarshipweb_home.html
 backups/
 node_modules/
 public/uploads/

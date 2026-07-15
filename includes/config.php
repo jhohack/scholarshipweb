@@ -98,7 +98,7 @@ if (!function_exists('loadLocalEnvFile')) {
 loadLocalEnvFile(dirname(__DIR__) . '/.env', false);
 loadLocalEnvFile(dirname(__DIR__) . '/.env.local');
 
-$maintenanceModeEnabled = env_config('MAINTENANCE_MODE', '1') === '1';
+$maintenanceModeEnabled = env_config('MAINTENANCE_MODE', '0') === '1';
 $maintenanceAllowedScripts = [
     'maintenance.php',
 ];

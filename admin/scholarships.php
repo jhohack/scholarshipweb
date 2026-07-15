@@ -949,6 +949,314 @@ switch ($action) {
         <?php
         break;
 
+    case 'hub':
+        // Scholarship Hub Page - shows all management options for a single scholarship
+        $scholarship = null;
+        $capacity = null;
+
+        if ($scholarship_id) {
+            try {
+                $stmt = $pdo->prepare("SELECT * FROM scholarships WHERE id = ? LIMIT 1");
+                $stmt->execute([$scholarship_id]);
+                $scholarship = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if ($scholarship) {
+                    $capacity = getScholarshipCapacitySummary(
+                        $pdo,
+                        (int)$scholarship['id'],
+                        (int)($scholarship['available_slots'] ?? 0)
+                    );
+                } else {
+                    $errors[] = "Scholarship not found.";
+                }
+            } catch (PDOException $e) {
+                $errors[] = "Database error: " . $e->getMessage();
+            }
+        } else {
+            $errors[] = "Invalid scholarship ID.";
+        }
+
+        if (!$scholarship) {
+            echo '<div class="alert alert-danger" data-aos="fade-up">Scholarship not found. <a href="scholarships.php">Back to Scholarships</a></div>';
+            break;
+        }
+
+        // Determine status styling
+        $status_badge = match($scholarship['status'] ?? 'active') {
+            'active' => '<span class="badge bg-success">Active</span>',
+            'inactive' => '<span class="badge bg-warning text-dark">Draft</span>',
+            'archived' => '<span class="badge bg-secondary">Archived</span>',
+            default => '<span class="badge bg-light text-dark">Unknown</span>'
+        };
+
+        // Capacity state
+        $state = 'open';
+        if (($scholarship['status'] ?? '') === 'inactive') {
+            $state = 'draft';
+        } elseif (!empty($scholarship['deadline']) && strtotime((string) $scholarship['deadline']) < time()) {
+            $state = 'closed';
+        } elseif (!empty($capacity['is_full'])) {
+            $state = 'full';
+        } elseif (empty($scholarship['accepting_new_applicants'])) {
+            $state = 'closed';
+        }
+
+        $state_label = match ($state) {
+            'full' => 'Full',
+            'closed' => 'Closed',
+            'draft' => 'Draft',
+            default => 'Open',
+        };
+        $state_badge = match ($state) {
+            'full' => 'bg-danger',
+            'closed' => 'bg-secondary',
+            'draft' => 'bg-warning text-dark',
+            default => 'bg-success',
+        };
+        ?>
+        <div class="d-flex justify-content-between align-items-center mb-4" data-aos="fade-down">
+            <div>
+                <h1 class="fw-bold mb-2"><?php echo htmlspecialchars($scholarship['name']); ?></h1>
+                <div class="d-flex gap-2 align-items-center">
+                    <?php echo $status_badge; ?>
+                    <span class="badge <?php echo $state_badge; ?>"><?php echo $state_label; ?></span>
+                </div>
+            </div>
+            <a href="scholarships.php" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-2"></i>Back to List</a>
+        </div>
+
+        <?php if (!empty($errors)) echo '<div class="alert alert-danger" data-aos="fade-up">' . implode('<br>', array_map('htmlspecialchars', $errors)) . '</div>'; ?>
+        <?php if ($success) echo '<div class="alert alert-success" data-aos="fade-up">' . htmlspecialchars($success) . '</div>'; ?>
+
+        <!-- Program Details -->
+        <div class="row mb-4" data-aos="fade-up">
+            <div class="col-md-6">
+                <div class="content-block h-100">
+                    <h3 class="mb-3">Program Details</h3>
+                    <dl class="row">
+                        <dt class="col-sm-4">Category:</dt>
+                        <dd class="col-sm-8"><?php echo htmlspecialchars($scholarship['category'] ?? 'N/A'); ?></dd>
+
+                        <dt class="col-sm-4">Amount:</dt>
+                        <dd class="col-sm-8">
+                            <?php
+                                $amount_display = $scholarship['amount_type'] === 'None' ? 'N/A' : number_format((float)($scholarship['amount'] ?? 0), 2) . ' ' . htmlspecialchars($scholarship['amount_type'] ?? 'Peso');
+                                echo $amount_display;
+                            ?>
+                        </dd>
+
+                        <dt class="col-sm-4">Deadline:</dt>
+                        <dd class="col-sm-8">
+                            <?php echo !empty($scholarship['deadline']) ? htmlspecialchars(date("M d, Y", strtotime($scholarship['deadline']))) : 'N/A'; ?>
+                        </dd>
+
+                        <dt class="col-sm-4">End of Term:</dt>
+                        <dd class="col-sm-8">
+                            <?php echo !empty($scholarship['end_of_term']) ? htmlspecialchars(date("M d, Y", strtotime($scholarship['end_of_term']))) : 'N/A'; ?>
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="content-block h-100">
+                    <h3 class="mb-3">Capacity Summary</h3>
+                    <div class="row g-3">
+                        <div class="col-6">
+                            <div class="text-center p-3 bg-light rounded">
+                                <div class="h3 mb-1 fw-bold text-primary"><?php echo (int)($capacity['approved_count'] ?? 0); ?></div>
+                                <div class="small text-muted">Approved Scholars</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="text-center p-3 bg-light rounded">
+                                <div class="h3 mb-1 fw-bold text-info"><?php echo (int)($scholarship['available_slots'] ?? 0); ?></div>
+                                <div class="small text-muted">Total Slots</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="text-center p-3 bg-light rounded">
+                                <div class="h3 mb-1 fw-bold text-warning"><?php echo (int)($capacity['occupied_count'] ?? 0); ?></div>
+                                <div class="small text-muted">Occupied Slots</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="text-center p-3 bg-light rounded">
+                                <div class="h3 mb-1 fw-bold text-success"><?php echo (int)($capacity['remaining_slots'] ?? 0); ?></div>
+                                <div class="small text-muted">Remaining Slots</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Management Actions -->
+        <div class="content-block mb-4" data-aos="fade-up" data-aos-delay="100">
+            <h3 class="mb-4">Management Actions</h3>
+            <div class="row g-3">
+                <!-- Manage Slots -->
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center mb-3">
+                                <i class="bi bi-sliders fs-4 text-primary me-3"></i>
+                                <h5 class="card-title mb-0">Manage Slots</h5>
+                            </div>
+                            <p class="card-text text-muted small">Add slots, view approved students, and manage capacity.</p>
+                            <button
+                                type="button"
+                                class="btn btn-primary btn-sm w-100"
+                                data-bs-toggle="modal"
+                                data-bs-target="#manageSlotsModal"
+                                data-scholarship-id="<?php echo (int) $scholarship['id']; ?>"
+                                data-scholarship-name="<?php echo htmlspecialchars($scholarship['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                data-approved-count="<?php echo (int) ($capacity['approved_count'] ?? 0); ?>"
+                                data-occupied-count="<?php echo (int) ($capacity['occupied_count'] ?? 0); ?>"
+                                data-available-slots="<?php echo (int) ($scholarship['available_slots'] ?? 0); ?>"
+                                data-remaining-slots="<?php echo (int) ($capacity['remaining_slots'] ?? 0); ?>"
+                                data-deadline="<?php echo htmlspecialchars($scholarship['deadline'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                                data-status="<?php echo htmlspecialchars($scholarship['status'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                                data-accepting-new="<?php echo !empty($scholarship['accepting_new_applicants']) ? '1' : '0'; ?>"
+                                data-is-full="<?php echo !empty($capacity['is_full']) ? '1' : '0'; ?>"
+                                data-approved-students="<?php echo htmlspecialchars(json_encode($capacity['approved_students'] ?? []), ENT_QUOTES, 'UTF-8'); ?>"
+                                data-clone-url="scholarships.php?action=add&amp;clone_id=<?php echo (int) $scholarship['id']; ?>"
+                            >
+                                <i class="bi bi-sliders me-2"></i>Open Modal
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Manage Exam -->
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center mb-3">
+                                <i class="bi bi-pencil-square fs-4 text-success me-3"></i>
+                                <h5 class="card-title mb-0">Manage Exam</h5>
+                            </div>
+                            <p class="card-text text-muted small">Add exam questions, set passing score, and configure requirements.</p>
+                            <a href="scholarships.php?action=manage_exam&id=<?php echo $scholarship['id']; ?>" class="btn btn-success btn-sm w-100">
+                                <i class="bi bi-pencil-square me-2"></i>Configure
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Manage Form -->
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center mb-3">
+                                <i class="bi bi-ui-checks fs-4 text-info me-3"></i>
+                                <h5 class="card-title mb-0">Manage Form</h5>
+                            </div>
+                            <p class="card-text text-muted small">Create and customize the application form fields.</p>
+                            <a href="scholarships.php?action=manage_form&id=<?php echo $scholarship['id']; ?>" class="btn btn-info btn-sm w-100">
+                                <i class="bi bi-ui-checks me-2"></i>Configure
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Edit Details -->
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center mb-3">
+                                <i class="bi bi-pencil-fill fs-4 text-warning me-3"></i>
+                                <h5 class="card-title mb-0">Edit Details</h5>
+                            </div>
+                            <p class="card-text text-muted small">Update scholarship name, description, amount, and deadlines.</p>
+                            <a href="scholarships.php?action=edit&id=<?php echo $scholarship['id']; ?>" class="btn btn-warning btn-sm w-100">
+                                <i class="bi bi-pencil-fill me-2"></i>Edit
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Archive -->
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center mb-3">
+                                <i class="bi bi-archive-fill fs-4 text-muted me-3"></i>
+                                <h5 class="card-title mb-0">Archive</h5>
+                            </div>
+                            <p class="card-text text-muted small">Archive this scholarship term (cannot be reopened).</p>
+                            <form action="scholarships.php" method="POST" onsubmit="return confirm('Are you sure you want to archive this scholarship? This cannot be undone.');">
+                                <input type="hidden" name="action" value="archive_scholarship">
+                                <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                                <input type="hidden" name="scholarship_id" value="<?php echo $scholarship['id']; ?>">
+                                <button type="submit" class="btn btn-outline-danger btn-sm w-100">
+                                    <i class="bi bi-archive-fill me-2"></i>Archive
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- End Term -->
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center mb-3">
+                                <i class="bi bi-clock-history fs-4 text-danger me-3"></i>
+                                <h5 class="card-title mb-0">End Term</h5>
+                            </div>
+                            <p class="card-text text-muted small">End this scholarship term and convert applicants to renewal status.</p>
+                            <form action="scholarships.php" method="POST" onsubmit="return confirm('End term? This will set all Active scholars to \'For Renewal\' and reject pending applications.');">
+                                <input type="hidden" name="action" value="expire_scholarship">
+                                <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                                <input type="hidden" name="scholarship_id" value="<?php echo $scholarship['id']; ?>">
+                                <button type="submit" class="btn btn-outline-danger btn-sm w-100">
+                                    <i class="bi bi-clock-history me-2"></i>End Term
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Related Pages -->
+        <div class="content-block" data-aos="fade-up" data-aos-delay="200">
+            <h3 class="mb-4">Related Pages</h3>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <a href="applications.php?scholarship_id=<?php echo $scholarship['id']; ?>&status_filter=all" class="card card-link text-decoration-none h-100">
+                        <div class="card-body">
+                            <i class="bi bi-person-check fs-4 text-primary me-2"></i>
+                            <h5 class="card-title d-inline">View Applications</h5>
+                            <p class="card-text text-muted small mt-2">View all applicants for this scholarship program.</p>
+                        </div>
+                    </a>
+                </div>
+                <div class="col-md-6">
+                    <a href="exam-results.php?scholarship_id=<?php echo $scholarship['id']; ?>" class="card card-link text-decoration-none h-100">
+                        <div class="card-body">
+                            <i class="bi bi-file-text fs-4 text-success me-2"></i>
+                            <h5 class="card-title d-inline">View Exam Results</h5>
+                            <p class="card-text text-muted small mt-2">View exam submissions and scores for this program.</p>
+                        </div>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <style>
+            .card-link {
+                transition: all 0.3s ease;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            }
+            .card-link:hover {
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                transform: translateY(-2px);
+            }
+        </style>
+        <?php
+        break;
+
     case 'list':
     default:
         $active_scholarships = [];
@@ -1036,7 +1344,7 @@ switch ($action) {
                         <?php else: ?>
                             <?php foreach ($active_scholarships as $scholarship): ?>
                                 <tr>
-                                    <td><a href="scholarships.php?action=view&id=<?php echo $scholarship['id']; ?>" class="fw-bold text-decoration-none"><?php echo htmlspecialchars($scholarship['name']); ?></a></td>
+                                    <td><a href="scholarships.php?action=hub&id=<?php echo $scholarship['id']; ?>" class="fw-bold text-decoration-none"><?php echo htmlspecialchars($scholarship['name']); ?></a></td>
                                     <td class="text-center">
                                         <div class="mb-1">
                                             <span class="fw-bold fs-5"><?php echo (int) ($scholarship['approved_count'] ?? 0); ?></span>
